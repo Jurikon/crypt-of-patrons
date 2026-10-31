@@ -151,11 +151,13 @@ describe('run: rooms, rewards, doors', () => {
     expect(counts(6)).toBeGreaterThan(counts(1) + 0.8);
   });
 
-  it('after the sixth room every door leads to the boss', () => {
-    const s = createGame(8);
-    enterRoom(s, ACT.rooms, 'combat', null, []);
-    const cleared = apply(s, killAll).state;
-    expect(cleared.run!.doors.every((d) => d.reward === 'boss')).toBe(true);
+  it('after the sixth room exactly one door opens, and it leads to the boss', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const s = createGame(seed);
+      enterRoom(s, ACT.rooms, 'combat', null, []);
+      const cleared = apply(s, killAll).state;
+      expect(cleared.run!.doors.map((d) => d.reward)).toEqual(['boss']);
+    }
   });
 
   it('dying ends the run', () => {

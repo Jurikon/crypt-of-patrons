@@ -202,7 +202,7 @@ export function runLost(state: GameState, events: GameEvent[]): void {
   events.push({ type: 'runEnded', result: 'lost' });
 }
 
-/** Lights the exits: each gets a reward kind (different ones when possible); after the last room, the boss. */
+/** Lights the exits: each gets a reward kind (different ones when possible); after the last room, one door to the boss. */
 function openDoors(state: GameState, events: GameEvent[]): void {
   const run = state.run;
   const p = state.players[0];
@@ -211,7 +211,9 @@ function openDoors(state: GameState, events: GameEvent[]): void {
   const rng = rngFor(state, 'doors');
   const doors: DoorOffer[] = [];
   if (run.depth >= ACT.rooms) {
-    for (const x of exits) doors.push({ door: x.i, reward: 'boss' });
+    // One way on: a single door to the boss, the other exits stay shut.
+    const first = exits[0];
+    if (first) doors.push({ door: first.i, reward: 'boss' });
   } else {
     const available = DOOR_WEIGHTS.filter((w) => {
       if (w.kind === 'ability') return newAbilities(p).length > 0;
