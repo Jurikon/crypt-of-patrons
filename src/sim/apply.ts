@@ -1,10 +1,23 @@
 import { add, dirVec, getCell, isWalkable, rotateDir, type Vec2 } from '../core/grid';
-import { ABILITIES, ABILITY_SLOTS, getAbility, MODIFIERS } from '../content';
+import { ABILITIES, ABILITY_SLOTS, ACT, getAbility, MODIFIERS } from '../content';
 import { actAllies, advanceEnemies, intentCells } from './ai';
+import { makeEnemy } from './encounter';
+import {
+  chooseReward,
+  doorAt,
+  effectiveCooldown,
+  enterDoor,
+  enterRoom,
+  roomCleared,
+  runLost,
+  upgradedEffects,
+} from './run';
 import type { Command, GameEvent, MoveDir, RejectReason } from './commands';
 import {
   createEngine,
   dealDamage,
+  dirTowards,
+  emit,
   emitTurn,
   killUnit,
   moved,
@@ -13,7 +26,7 @@ import {
   tickDurations,
   type Engine,
 } from './engine';
-import { isPlayer, unitAt, type GameState, type Player } from './state';
+import { isPlayer, surfaceAt, unitAt, type Enemy, type GameState, type Player } from './state';
 import { actionDir, validTargets } from './targeting';
 import { checkCombatEnd, cooldownOf, setCooldown, tickCooldowns } from './units';
 
@@ -51,8 +64,15 @@ export function apply(prev: GameState, command: Command): ApplyResult {
     }
     case 'move': {
       if (player.hp <= 0) return reject('dead');
+      if (state.run?.phase === 'reward') return reject('choose_reward');
       const to = add(player, dirVec(rotateDir(player.dir, MOVE_ROTATION[command.dir])));
       const cell = getCell(state.room.grid, to.x, to.y);
+      const door = command.dir === 'forward' ? doorAt(state, to.x, to.y) : -1;
+      if (door >= 0) {
+        // Through an open door into the next room.
+        enterDoor(state, door, events);
+        break;
+      }
       const occupant = unitAt(state, to.x, to.y);
       const baseAttack = player.abilities[0];
       const foe = occupant && !isPlayer(state, occupant) && !state.allies.includes(occupant as never);
@@ -71,10 +91,27 @@ export function apply(prev: GameState, command: Command): ApplyResult {
         moved(eng, player, from, player, []);
         settle(eng);
         if (isActive(state)) endAction(eng, player, free);
+      } else if (occupant && state.allies.includes(occupant as never)) {
+        // Walking into your own summon trades places with it, so a skeleton never walls you in.
+        const free = player.freeActions > 0;
+        const from = { x: player.x, y: player.y };
+        occupant.x = from.x;
+        occupant.y = from.y;
+        player.x = to.x;
+        player.y = to.y;
+        events.push({ type: 'swapped', unitId: player.id, otherId: occupant.id, from, to });
+        moved(eng, player, from, player, []);
+        settle(eng);
+        if (isActive(state)) endAction(eng, player, free);
       } else {
-        // Bumping into a wall (or your own skeleton) costs nothing.
+        // Bumping into a wall costs nothing.
         events.push({ type: 'bumped', unitId: player.id, at: to, cell });
       }
+      break;
+    }
+    case 'chooseReward': {
+      const r = chooseReward(state, command.index, command.replace, events);
+      if (r) return reject(r);
       break;
     }
     case 'useAbility': {
@@ -95,6 +132,8 @@ export function apply(prev: GameState, command: Command): ApplyResult {
       } else if (command.action === 'killAll') {
         for (const e of [...state.enemies]) if (isActive(state)) killUnit(eng, e, null, []);
         settle(eng);
+      } else if (command.action === 'toBoss' && state.run) {
+        enterRoom(state, ACT.rooms + 1, 'boss', null, events);
       }
       break;
     }
@@ -121,6 +160,11 @@ export function apply(prev: GameState, command: Command): ApplyResult {
       return reject('unknown_command');
     }
   }
+  // The run moves on when a room's fight ends.
+  if (state.run?.phase === 'combat') {
+    if (state.combat.status === 'won') roomCleared(state, events);
+    else if (state.combat.status === 'lost') runLost(state, events);
+  }
   return { state, events };
 }
 
@@ -139,14 +183,21 @@ function useAbility(eng: Engine, player: Player, abilityId: string, target: Vec2
   if (!valid.some((c) => same(c, chosen))) return 'invalid_target';
 
   // +1 because the turn this ability is used on ticks once as the world answers.
-  setCooldown(player, ability.id, ability.cooldown > 0 ? ability.cooldown + 1 : 0);
+  const cooldown = effectiveCooldown(player, ability.id);
+  setCooldown(player, ability.id, cooldown > 0 ? cooldown + 1 : 0);
   const dir = actionDir(player, ability, chosen);
   if (dir !== player.dir) {
     events.push({ type: 'turned', unitId: player.id, from: player.dir, to: dir });
     player.dir = dir;
   }
   events.push({ type: 'abilityUsed', unitId: player.id, abilityId: ability.id, target: chosen, dir });
-  runEffects(eng, ability.effects, { source: player, target: chosen, dir, tags: ability.tags, event: null });
+  runEffects(eng, upgradedEffects(player, ability.id), {
+    source: player,
+    target: chosen,
+    dir,
+    tags: ability.tags,
+    event: null,
+  });
   settle(eng);
   return null;
 }
@@ -176,10 +227,14 @@ function worldTurn(eng: Engine): void {
     const e = state.enemies.find((x) => x.id === id);
     if (!e || !e.intent || !isActive(state)) continue;
     const intent = e.intent;
-    const { cells, hit } = intentCells(state, e, intent);
+    const { cells, hits } = intentCells(state, e, intent);
     events.push({ type: 'enemyAttack', unitId: e.id, intent, cells });
     e.intent = null;
-    if (hit) dealDamage(eng, hit, intent.damage, e, 'attack', intent.kind === 'melee' ? ['melee'] : ['projectile']);
+    e.strikes++;
+    if (intent.kind === 'summon') summonEnemies(eng, e, intent.unit, cells);
+    else
+      for (const hit of hits)
+        dealDamage(eng, hit, intent.damage, e, 'attack', intent.kind === 'line' ? ['projectile'] : ['melee']);
     settle(eng);
   }
   if (!isActive(state)) return;
@@ -199,6 +254,32 @@ function worldTurn(eng: Engine): void {
   events.push({ type: 'phaseChanged', phase: 'player', turn: state.combat.turn });
   emitTurn(eng, 'turnStart');
   settle(eng);
+}
+
+/** An enemy calls up more enemies on the cells it telegraphed (still free ones only; corpses are used up). */
+function summonEnemies(eng: Engine, summoner: Enemy, unit: string, cells: readonly Vec2[]): void {
+  const { state, events } = eng;
+  for (const c of cells) {
+    if (getCell(state.room.grid, c.x, c.y) !== 'floor' || unitAt(state, c.x, c.y)) continue;
+    if (surfaceAt(state, c, 'corpse')) {
+      state.surfaces = state.surfaces.filter((sf) => !(sf.id === 'corpse' && sf.x === c.x && sf.y === c.y));
+      events.push({ type: 'surfaceRemoved', surface: 'corpse', at: c });
+    }
+    const target = state.players.find((p) => p.hp > 0) ?? summoner;
+    const e = makeEnemy(`m${state.nextId++}`, unit, c, dirTowards(c, target), false);
+    state.enemies.push(e);
+    events.push({
+      type: 'summoned',
+      unitId: e.id,
+      summon: unit,
+      side: 'foes',
+      owner: summoner.id,
+      at: c,
+      dir: e.dir,
+      hp: e.hp,
+    });
+    emit(eng, 'summon', { actor: summoner, subject: e });
+  }
 }
 
 /** Replays a command list from a fresh state. Used by tests and by bug reports (seed + commands). */

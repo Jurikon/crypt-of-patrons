@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CLASSES } from '../src/content';
-import { playFights, TURN_LIMIT } from './bot';
+import { playFights, playRun, TURN_LIMIT } from './bot';
 
 describe('balancing bot', () => {
   for (const cls of CLASSES) {
@@ -15,6 +15,12 @@ describe('balancing bot', () => {
     it(`${cls.id}: 100 greedy fights all finish`, () => {
       for (const r of playFights(100, 1, 'greedy', cls.id))
         expect(r.status, `seed ${r.seed} did not finish in ${TURN_LIMIT} turns`).not.toBe('active');
+    }, 120_000);
+
+    it(`${cls.id}: 30 greedy runs through act 1 all end in a win or a death, never stuck`, () => {
+      const runs = Array.from({ length: 30 }, (_, i) => playRun(i + 1, cls.id));
+      for (const r of runs) expect(r.result, `seed ${r.seed} stuck in room ${r.depth}`).not.toBe('stuck');
+      expect(runs.some((r) => r.depth >= 3)).toBe(true);
     }, 120_000);
 
     it(`${cls.id}: with every ability and modifier at once, 60 random fights finish without errors`, () => {

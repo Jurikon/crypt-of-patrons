@@ -196,7 +196,11 @@ export interface ClassDef {
 /** What an enemy telegraphs. Directions are relative to the enemy when it acts, so pushing it redirects the attack. */
 export type AttackSpec =
   | { readonly kind: 'melee'; readonly damage: number }
-  | { readonly kind: 'line'; readonly damage: number; readonly range: number };
+  | { readonly kind: 'line'; readonly damage: number; readonly range: number }
+  /** The cell in front and the two beside it, everyone in them. */
+  | { readonly kind: 'sweep'; readonly damage: number }
+  /** Calls up `count` units of an enemy type; the cells are chosen (and shown) when it is telegraphed. */
+  | { readonly kind: 'summon'; readonly unit: string; readonly count: number };
 
 export type EnemyBehavior =
   /** Walk next to the nearest target and strike. */
@@ -210,9 +214,21 @@ export interface EnemyDef {
   readonly maxHp: number;
   readonly move: number;
   readonly attack: AttackSpec;
+  /** Attacks used in turn, one per strike (bosses). Without it the enemy always uses `attack`. */
+  readonly pattern?: readonly AttackSpec[];
+  /** Multiplier on how far pushes move it (0.5 = half as far, rounded down). */
+  readonly pushFactor?: number;
+  /** A boss: one per boss room, never in ordinary encounters. */
+  readonly boss?: boolean;
   readonly behavior: EnemyBehavior;
   /** Which voxel model the renderer draws. */
   readonly model: string;
   /** Relative spawn frequency in encounters. */
   readonly weight: number;
 }
+
+/** What a door offers (GDD 1): shown on the door, granted after clearing the room behind it. */
+export type RewardKind = 'ability' | 'modifier' | 'upgrade' | 'rest' | 'elite' | 'boss';
+
+/** Ability upgrades (a general reward, M3): faster cooldown or one more damage on every hit. */
+export type UpgradeKind = 'cooldown' | 'damage';

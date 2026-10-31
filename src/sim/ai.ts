@@ -1,7 +1,7 @@
-import { add, dirVec, getCell, index, DIRS, type Dir, type Vec2 } from '../core/grid';
+import { add, dirVec, getCell, index, rotateDir, DIRS, type Dir, type Vec2 } from '../core/grid';
 import { getEnemy, getStatus, getSummon, type AttackSpec } from '../content';
 import { dealDamage, moved, settle, type Engine } from './engine';
-import { unitAt, unitById, type Ally, type Enemy, type GameState, type Intent, type Unit } from './state';
+import { surfaceAt, unitAt, unitById, type Ally, type Enemy, type GameState, type Intent, type Unit } from './state';
 
 /**
  * Enemy behaviour. Fully deterministic: fixed enemy order, BFS with a fixed neighbour order,
@@ -10,30 +10,92 @@ import { unitAt, unitById, type Ally, type Enemy, type GameState, type Intent, t
 
 const blocksSight = (t: string) => t === 'wall' || t === 'pillar' || t === 'door';
 
+/** An intent for an attack that needs no board knowledge (everything but summons). */
 export function makeIntent(attack: AttackSpec, dir: Dir): Intent {
-  return attack.kind === 'melee'
-    ? { kind: 'melee', dir, damage: attack.damage }
-    : { kind: 'line', dir, damage: attack.damage, range: attack.range };
+  switch (attack.kind) {
+    case 'melee':
+      return { kind: 'melee', dir, damage: attack.damage };
+    case 'line':
+      return { kind: 'line', dir, damage: attack.damage, range: attack.range };
+    case 'sweep':
+      return { kind: 'sweep', dir, damage: attack.damage };
+    case 'summon':
+      return { kind: 'summon', dir, damage: 0, unit: attack.unit, cells: [] };
+  }
 }
 
-/** Cells an intent covers from the enemy's current position, and the unit it would hit. */
-export function intentCells(state: GameState, enemy: Enemy, intent: Intent): { cells: Vec2[]; hit: Unit | undefined } {
+/** The attack an enemy uses next: its pattern in turn, or its only attack. */
+export function nextAttack(e: Enemy): AttackSpec {
+  const def = getEnemy(e.type);
+  return def.pattern?.[e.strikes % def.pattern.length] ?? def.attack;
+}
+
+/**
+ * Where summoned enemies will rise: free floor cells, corpses first, then nearest to the summoner,
+ * never right next to a player. Chosen when the summon is telegraphed, so the player sees them coming.
+ */
+function summonCells(state: GameState, e: Enemy, count: number): Vec2[] {
+  const g = state.room.grid;
+  const cells: { c: Vec2; corpse: number; d: number; i: number }[] = [];
+  for (let y = 0; y < g.h; y++)
+    for (let x = 0; x < g.w; x++) {
+      const c = { x, y };
+      if (getCell(g, x, y) !== 'floor' || unitAt(state, x, y)) continue;
+      if (state.players.some((p) => p.hp > 0 && manhattan(p, c) <= 1)) continue;
+      cells.push({ c, corpse: surfaceAt(state, c, 'corpse') ? 0 : 1, d: manhattan(e, c), i: index(g, x, y) });
+    }
+  cells.sort((a, b) => a.corpse - b.corpse || a.d - b.d || a.i - b.i);
+  return cells.slice(0, count).map((x) => x.c);
+}
+
+/** The enemy's next intent, facing `dir`. */
+export function intentFor(state: GameState, e: Enemy, dir: Dir): Intent {
+  const attack = nextAttack(e);
+  if (attack.kind === 'summon')
+    return { kind: 'summon', dir, damage: 0, unit: attack.unit, cells: summonCells(state, e, attack.count) };
+  return makeIntent(attack, dir);
+}
+
+/** Cells an intent covers from the enemy's current position, and the units it would hit (`hit`: the first). */
+export function intentCells(
+  state: GameState,
+  enemy: Enemy,
+  intent: Intent,
+): { cells: Vec2[]; hit: Unit | undefined; hits: Unit[] } {
   const step = dirVec(intent.dir);
-  if (intent.kind === 'melee') {
-    const cell = add(enemy, step);
-    if (blocksSight(getCell(state.room.grid, cell.x, cell.y))) return { cells: [], hit: undefined };
-    return { cells: [cell], hit: unitAt(state, cell.x, cell.y) };
+  const result = (cells: Vec2[]) => {
+    const hits = cells.map((c) => unitAt(state, c.x, c.y)).filter((u): u is Unit => !!u);
+    return { cells, hit: hits[0], hits };
+  };
+  switch (intent.kind) {
+    case 'melee': {
+      const cell = add(enemy, step);
+      return result(blocksSight(getCell(state.room.grid, cell.x, cell.y)) ? [] : [cell]);
+    }
+    case 'sweep': {
+      const front = add(enemy, step);
+      const cells = [
+        front,
+        add(front, dirVec(rotateDir(intent.dir, 1))),
+        add(front, dirVec(rotateDir(intent.dir, -1))),
+      ];
+      return result(cells.filter((c) => !blocksSight(getCell(state.room.grid, c.x, c.y))));
+    }
+    case 'summon':
+      return { cells: [...intent.cells], hit: undefined, hits: [] };
+    case 'line': {
+      const cells: Vec2[] = [];
+      let p: Vec2 = { x: enemy.x, y: enemy.y };
+      for (let i = 0; i < intent.range; i++) {
+        p = add(p, step);
+        if (blocksSight(getCell(state.room.grid, p.x, p.y))) break;
+        cells.push(p);
+        const u = unitAt(state, p.x, p.y);
+        if (u) return { cells, hit: u, hits: [u] };
+      }
+      return { cells, hit: undefined, hits: [] };
+    }
   }
-  const cells: Vec2[] = [];
-  let p: Vec2 = { x: enemy.x, y: enemy.y };
-  for (let i = 0; i < intent.range; i++) {
-    p = add(p, step);
-    if (blocksSight(getCell(state.room.grid, p.x, p.y))) break;
-    cells.push(p);
-    const u = unitAt(state, p.x, p.y);
-    if (u) return { cells, hit: u };
-  }
-  return { cells, hit: undefined };
 }
 
 const manhattan = (a: Vec2, b: Vec2) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
@@ -348,7 +410,7 @@ export function advanceEnemies(eng: Engine): void {
     // A ranged enemy either moves or aims in one turn, never both, and after a move it stands for a turn:
     // otherwise it kites forever at the player's own speed.
     if (e.moved && getEnemy(e.type).behavior.kind === 'ranged') continue;
-    e.intent = makeIntent(getEnemy(e.type).attack, e.dir);
+    e.intent = intentFor(state, e, e.dir);
     events.push({ type: 'intentDeclared', unitId: e.id, intent: e.intent });
   }
 }
@@ -358,6 +420,6 @@ export function declareIntentsInPlace(state: GameState): void {
   for (const e of state.enemies) {
     const p = nearestPlayer(state, e);
     if (p) e.dir = dirTowards(e, p);
-    e.intent = makeIntent(getEnemy(e.type).attack, e.dir);
+    e.intent = intentFor(state, e, e.dir);
   }
 }

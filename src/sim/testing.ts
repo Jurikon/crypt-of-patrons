@@ -49,8 +49,8 @@ export function stateFromMap(map: string, opts: MapOptions = {}): GameState {
         p.modifiers.push(...(opts.modifiers ?? []));
         players.push(p);
         cells.push('floor');
-      } else if (ch === 'W' || ch === 'A') {
-        const type = ch === 'W' ? 'skeletonWarrior' : 'skeletonArcher';
+      } else if (ch === 'W' || ch === 'A' || ch === 'B') {
+        const type = ch === 'W' ? 'skeletonWarrior' : ch === 'A' ? 'skeletonArcher' : 'cryptWarden';
         const def = getEnemy(type);
         enemies.push({
           id: `e${enemies.length + 1}`,
@@ -63,6 +63,8 @@ export function stateFromMap(map: string, opts: MapOptions = {}): GameState {
           statuses: [],
           intent: opts.intents ? makeIntent(def.attack, enemyDir) : null,
           moved: false,
+          elite: false,
+          strikes: 0,
         });
         cells.push('floor');
       } else if (ch === 'S') {
@@ -107,5 +109,6 @@ export function stateFromMap(map: string, opts: MapOptions = {}): GameState {
     surfaces,
     combat: { turn: 1, phase: 'player', status: enemies.length ? 'active' : 'won' },
     nextId: allies.length + 1,
+    run: null,
   };
 }

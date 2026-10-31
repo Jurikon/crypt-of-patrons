@@ -63,7 +63,7 @@ export const ABILITIES: readonly AbilityDef[] = [
     tags: ['melee'],
     cooldown: 0,
     target: { kind: 'front' },
-    effects: [{ kind: 'damage', amount: 1 }],
+    effects: [{ kind: 'damage', amount: 2 }],
   },
   {
     id: 'necro.raise',
@@ -110,7 +110,7 @@ export const ABILITIES: readonly AbilityDef[] = [
     cooldown: 0,
     target: { kind: 'front' },
     effects: [
-      { kind: 'damage', amount: 1 },
+      { kind: 'damage', amount: 2 },
       { kind: 'status', status: 'bleed', turns: 2 },
     ],
   },
@@ -245,14 +245,14 @@ export const SURFACES: readonly SurfaceDef[] = [
 ];
 
 export const SUMMONS: readonly SummonDef[] = [
-  { id: 'necro.skeleton', nameKey: 'summon.skeleton', maxHp: 3, damage: 1, model: 'warrior', tags: ['summon'] },
+  { id: 'necro.skeleton', nameKey: 'summon.skeleton', maxHp: 3, damage: 2, model: 'warrior', tags: ['summon'] },
 ];
 
 export const CLASSES: readonly ClassDef[] = [
   {
     id: 'knight',
     nameKey: 'class.knight',
-    maxHp: 12,
+    maxHp: 16,
     abilities: ['knight.sword', 'knight.shieldBash'],
     passives: ['knight.bulwark'],
     pool: ['knight.dash', 'knight.challenge'],
@@ -260,7 +260,7 @@ export const CLASSES: readonly ClassDef[] = [
   {
     id: 'necromancer',
     nameKey: 'class.necromancer',
-    maxHp: 9,
+    maxHp: 13,
     abilities: ['necro.staff', 'necro.raise'],
     passives: ['necro.gravedigger'],
     pool: ['necro.boneSpear', 'necro.sacrifice'],
@@ -268,7 +268,7 @@ export const CLASSES: readonly ClassDef[] = [
   {
     id: 'rogue',
     nameKey: 'class.rogue',
-    maxHp: 10,
+    maxHp: 13,
     abilities: ['rogue.dagger', 'rogue.shadowStep'],
     passives: ['rogue.backstab'],
     pool: ['rogue.knife', 'rogue.swap'],
@@ -296,7 +296,71 @@ export const ENEMIES: readonly EnemyDef[] = [
     model: 'archer',
     weight: 2,
   },
+  {
+    id: 'cryptWarden',
+    nameKey: 'enemy.cryptWarden',
+    maxHp: 14,
+    move: 1,
+    attack: { kind: 'sweep', damage: 3 },
+    pattern: [
+      { kind: 'sweep', damage: 3 },
+      { kind: 'sweep', damage: 3 },
+      { kind: 'summon', unit: 'skeletonWarrior', count: 2 },
+    ],
+    behavior: { kind: 'melee' },
+    model: 'warden',
+    weight: 0,
+    pushFactor: 0.5,
+    boss: true,
+  },
 ];
+
+/** Shape of one act (GDD 1): combat rooms, then the boss. */
+export const ACT = {
+  /** Rooms before the boss. */
+  rooms: 6,
+  /** Elite rooms at most per act. */
+  maxElites: 2,
+  /** Share of max health a rest room restores. */
+  restHeal: 0.5,
+  /** Reward options offered at once (pick 1 of 3). */
+  offer: 3,
+  /** Extra health of elite enemies, and extra enemies in an elite room. */
+  eliteHp: 2,
+  eliteExtra: 1,
+} as const;
+
+/** How often each kind of reward shows up on doors (only kinds still available are drawn). */
+export const DOOR_WEIGHTS: readonly {
+  readonly kind: 'ability' | 'modifier' | 'upgrade' | 'rest' | 'elite';
+  readonly weight: number;
+}[] = [
+  { kind: 'ability', weight: 3 },
+  { kind: 'modifier', weight: 3 },
+  { kind: 'upgrade', weight: 2 },
+  { kind: 'rest', weight: 2 },
+  { kind: 'elite', weight: 1 },
+];
+
+/** Encounter size by depth in the act: weights for 2, 3, 4, 5 enemies. */
+export function encounterWeights(depth: number): readonly { readonly item: number; readonly weight: number }[] {
+  if (depth <= 2)
+    return [
+      { item: 2, weight: 3 },
+      { item: 3, weight: 4 },
+      { item: 4, weight: 1 },
+    ];
+  if (depth <= 4)
+    return [
+      { item: 3, weight: 4 },
+      { item: 4, weight: 3 },
+    ];
+  return [
+    { item: 3, weight: 2 },
+    { item: 4, weight: 4 },
+    { item: 5, weight: 2 },
+  ];
+}
 
 /** Base damage a pushed unit takes when it hits something; passives add to it. */
 export const PUSH_COLLISION_DAMAGE = 1;

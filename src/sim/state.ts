@@ -1,11 +1,11 @@
 import { createRng, fork, type Rng } from '../core/rng';
 import type { Dir, Vec2 } from '../core/grid';
-import { getClass } from '../content';
+import { getClass, type RewardKind, type UpgradeKind } from '../content';
 import { generateRoom, type Room } from './gen/room';
 import { placeCorpses, placeEncounter } from './encounter';
 import { declareIntentsInPlace } from './ai';
 
-export const STATE_VERSION = 5;
+export const STATE_VERSION = 6;
 
 export interface Cooldown {
   readonly abilityId: string;
@@ -42,6 +42,8 @@ export interface Player extends UnitBase {
   cooldowns: Cooldown[];
   /** Actions the world will not answer (from "free action" effects). */
   freeActions: number;
+  /** Ability upgrades collected in the run (each one counts). */
+  upgrades: { readonly abilityId: string; readonly kind: UpgradeKind }[];
   /** Debug immortality. */
   god: boolean;
 }
@@ -56,13 +58,26 @@ export interface Ally extends UnitBase {
 /** What an enemy will do at the start of the next enemy phase. Direction is fixed; position follows the enemy. */
 export type Intent =
   | { readonly kind: 'melee'; readonly dir: Dir; readonly damage: number }
-  | { readonly kind: 'line'; readonly dir: Dir; readonly damage: number; readonly range: number };
+  | { readonly kind: 'line'; readonly dir: Dir; readonly damage: number; readonly range: number }
+  | { readonly kind: 'sweep'; readonly dir: Dir; readonly damage: number }
+  /** New enemies will rise on these cells. */
+  | {
+      readonly kind: 'summon';
+      readonly dir: Dir;
+      readonly damage: 0;
+      readonly unit: string;
+      readonly cells: readonly Vec2[];
+    };
 
 export interface Enemy extends UnitBase {
   readonly type: string;
   intent: Intent | null;
   /** Moved during the last enemy phase. Ranged enemies must then stand still for a turn. */
   moved: boolean;
+  /** Elite: tougher, marked with a red glow. */
+  elite: boolean;
+  /** Strikes made so far; picks the next attack of a `pattern`. */
+  strikes: number;
 }
 
 export type Unit = Player | Ally | Enemy;
@@ -78,6 +93,48 @@ export interface Surface {
   /** Turns left; null = until used. */
   turns: number | null;
   readonly side: Side;
+}
+
+export type RoomKind = 'combat' | 'elite' | 'rest' | 'boss';
+
+/** A door's offer once the room is cleared: which door (index into `room.doors`) and what lies behind it. */
+export interface DoorOffer {
+  readonly door: number;
+  readonly reward: RewardKind;
+}
+
+/** One reward option on the pick-1-of-3 screen. */
+export type RewardOption =
+  | { readonly kind: 'ability'; readonly id: string }
+  | { readonly kind: 'modifier'; readonly id: string }
+  | { readonly kind: 'upgrade'; readonly abilityId: string; readonly upgrade: UpgradeKind };
+
+/** Run journal entries (for the results screen now, analytics later). */
+export type RunLogEntry =
+  | { readonly type: 'room'; readonly depth: number; readonly kind: RoomKind }
+  | { readonly type: 'reward'; readonly depth: number; readonly option: RewardOption | null }
+  | { readonly type: 'cleared'; readonly depth: number; readonly turns: number }
+  | { readonly type: 'end'; readonly depth: number; readonly result: 'won' | 'lost' };
+
+/**
+ * The run (GDD 1): an act of rooms joined by doors. Everything comes from the run seed, so seed +
+ * commands replays a whole run.
+ */
+export interface RunState {
+  /** Room number in the act, 1-based; ACT.rooms + 1 is the boss room. */
+  depth: number;
+  kind: RoomKind;
+  /** fighting → (reward) → doors → next room; or the run is over. */
+  phase: 'combat' | 'reward' | 'doors' | 'won' | 'lost';
+  /** Reward for clearing the current room (from the door taken into it). */
+  pending: RewardKind | null;
+  /** The options on screen while choosing. */
+  offer: RewardOption[];
+  doors: DoorOffer[];
+  elites: number;
+  /** Turns spent in finished rooms. */
+  turns: number;
+  log: RunLogEntry[];
 }
 
 /**
@@ -108,6 +165,8 @@ export interface GameState {
   combat: CombatState;
   /** Counter for ids of units created during play (summons). */
   nextId: number;
+  /** The run around this room; null for single test fights. */
+  run: RunState | null;
 }
 
 export interface CreateGameOptions {
@@ -133,36 +192,70 @@ export function createPlayer(id: string, classId: string, x: number, y: number, 
     modifiers: [],
     cooldowns: [],
     freeActions: 0,
+    upgrades: [],
     god: false,
   };
 }
 
+/** Starts a run: the first room of act 1 (or a lone fight without a run, for tests). */
 export function createGame(seed: number, opts: CreateGameOptions = {}): GameState {
   const root = createRng(seed);
-  const room = generateRoom(fork(root, 'room:0'));
   const classId = opts.classId ?? 'knight';
-  const players = (opts.playerIds ?? ['p1']).map((id) =>
-    createPlayer(id, classId, room.spawn.x, room.spawn.y, room.spawn.dir),
-  );
   const state: GameState = {
     version: STATE_VERSION,
     seed,
     rng: fork(root, 'sim'),
-    room,
-    players,
+    room: generateRoom(fork(root, 'room:0')),
+    players: [],
     allies: [],
     enemies: [],
     surfaces: [],
     combat: { turn: 1, phase: 'player', status: 'active' },
     nextId: 1,
+    run: {
+      depth: 1,
+      kind: 'combat',
+      phase: 'combat',
+      pending: 'ability',
+      offer: [],
+      doors: [],
+      elites: 0,
+      turns: 0,
+      log: [{ type: 'room', depth: 1, kind: 'combat' }],
+    },
   };
-  if (opts.enemies !== false) {
-    state.enemies = placeEncounter(fork(root, 'encounter'), state);
-    state.surfaces = placeCorpses(fork(root, 'corpses'), state);
+  state.players = (opts.playerIds ?? ['p1']).map((id) =>
+    createPlayer(id, classId, state.room.spawn.x, state.room.spawn.y, state.room.spawn.dir),
+  );
+  populateRoom(state, 1, 'combat', opts.enemies !== false);
+  return state;
+}
+
+/** RNG labels for a room; the first room keeps the labels it had before runs existed (same seeds, same rooms). */
+const label = (name: string, depth: number) => (depth === 1 ? name : `${name}:${depth}`);
+
+/**
+ * Fills the current room with its encounter and corpses (by depth and kind) and starts the fight.
+ * Rest rooms are empty and start cleared.
+ */
+export function populateRoom(state: GameState, depth: number, kind: RoomKind, enemies = true): void {
+  const root = createRng(state.seed);
+  state.allies = [];
+  state.enemies = [];
+  state.surfaces = [];
+  state.combat = { turn: 1, phase: 'player', status: 'active' };
+  if (enemies && kind !== 'rest') {
+    state.enemies = placeEncounter(fork(root, label('encounter', depth)), state, depth, kind);
+    state.surfaces = placeCorpses(fork(root, label('corpses', depth)), state);
     declareIntentsInPlace(state);
   }
   if (state.enemies.length === 0) state.combat.status = 'won';
-  return state;
+}
+
+/** Generates the room for a depth: the boss room is the biggest square. */
+export function roomFor(seed: number, depth: number, kind: RoomKind): Room {
+  const rng = fork(createRng(seed), depth === 1 ? 'room:0' : `room:${depth}`);
+  return generateRoom(rng, kind === 'boss' ? { minSize: 11, maxSize: 11 } : {});
 }
 
 export function findPlayer(state: GameState, id: string): Player | undefined {

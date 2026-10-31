@@ -157,7 +157,7 @@ describe('enemy intents', () => {
       { intents: true },
     );
     const r = apply(s, pass);
-    expect(r.state.players[0]!.hp).toBe(12 - 2);
+    expect(r.state.players[0]!.hp).toBe(16 - 2);
     expect(types(r.events).slice(0, 4)).toEqual(['abilityUsed', 'phaseChanged', 'enemyAttack', 'damaged']);
   });
 
@@ -172,7 +172,7 @@ describe('enemy intents', () => {
       { intents: true },
     );
     const r = apply(s, { type: 'move', playerId: 'p1', dir: 'right' });
-    expect(r.state.players[0]!.hp).toBe(12);
+    expect(r.state.players[0]!.hp).toBe(16);
     expect(r.events.find((e) => e.type === 'enemyAttack')).toBeDefined();
   });
 
@@ -193,7 +193,7 @@ describe('enemy intents', () => {
     const r = apply(s, bash);
     // Archer (3 HP) takes the redirected 2 → 1 HP left, and the player is untouched.
     expect(r.state.enemies.find((e) => e.id === 'e2')!.hp).toBe(1);
-    expect(r.state.players[0]!.hp).toBe(12);
+    expect(r.state.players[0]!.hp).toBe(16);
   });
 
   it('an archer shoots the first unit in line, even an ally', () => {
@@ -210,7 +210,7 @@ describe('enemy intents', () => {
     s.enemies[1]!.intent = null; // the warrior does nothing this turn
     const r = apply(s, pass);
     expect(r.state.enemies.find((e) => e.id === 'e2')!.hp).toBe(3);
-    expect(r.state.players[0]!.hp).toBe(12);
+    expect(r.state.players[0]!.hp).toBe(16);
   });
 
   it('pillars block arrows', () => {
@@ -226,7 +226,7 @@ describe('enemy intents', () => {
     );
     const r = apply(s, pass);
     expect(r.events.find((e) => e.type === 'enemyAttack')).toMatchObject({ cells: [] });
-    expect(r.state.players[0]!.hp).toBe(12);
+    expect(r.state.players[0]!.hp).toBe(16);
   });
 });
 
@@ -282,7 +282,7 @@ describe('turn structure', () => {
     r = apply(r.state, pass);
     expect(r.state.players[0]!.hp).toBe(1);
     r = apply(r.state, { type: 'debug', playerId: 'p1', action: 'heal' });
-    expect(r.state.players[0]!.hp).toBe(12);
+    expect(r.state.players[0]!.hp).toBe(16);
     r = apply(r.state, { type: 'debug', playerId: 'p1', action: 'killAll' });
     expect(r.state.combat.status).toBe('won');
   });

@@ -1,10 +1,10 @@
 import type { CellType, Dir, Vec2 } from '../core/grid';
-import type { CombatState, Intent, Side } from './state';
+import type { CombatState, DoorOffer, Intent, RewardOption, RoomKind, Side } from './state';
 
 /** Movement relative to where the player faces. */
 export type MoveDir = 'forward' | 'back' | 'left' | 'right';
 export type TurnDir = 'left' | 'right';
-export type DebugAction = 'killAll' | 'heal' | 'toggleGod';
+export type DebugAction = 'killAll' | 'heal' | 'toggleGod' | 'toBoss';
 
 /** Serializable intents. Input produces these; only `apply` turns them into state changes. */
 export type Command =
@@ -17,7 +17,17 @@ export type Command =
   /** Debug: put any ability in slot 1..4 (slot 0 is the base attack). */
   | { readonly type: 'debugGrant'; readonly playerId: string; readonly abilityId: string; readonly slot: number }
   /** Debug: switch a modifier on or off. */
-  | { readonly type: 'debugModifier'; readonly playerId: string; readonly modifierId: string };
+  | { readonly type: 'debugModifier'; readonly playerId: string; readonly modifierId: string }
+  /**
+   * Take one of the offered rewards (`index`), or none (null). A new ability with every slot full needs
+   * `replace`: the slot (1..4) it takes over.
+   */
+  | {
+      readonly type: 'chooseReward';
+      readonly playerId: string;
+      readonly index: number | null;
+      readonly replace?: number;
+    };
 
 export type RejectReason =
   | 'unknown_player'
@@ -27,7 +37,10 @@ export type RejectReason =
   | 'combat_over'
   | 'dead'
   | 'no_target'
-  | 'invalid_target';
+  | 'invalid_target'
+  | 'choose_reward'
+  | 'no_reward'
+  | 'slot_needed';
 
 /** What happened, in order, for the renderer and UI to animate. */
 export type GameEvent =
@@ -82,7 +95,9 @@ export type GameEvent =
   | {
       readonly type: 'summoned';
       readonly unitId: string;
+      /** Summon id (heroes) or enemy type (foes). */
       readonly summon: string;
+      readonly side: Side;
       readonly owner: string;
       readonly at: Vec2;
       readonly dir: Dir;
@@ -103,5 +118,11 @@ export type GameEvent =
   | { readonly type: 'intentCanceled'; readonly unitId: string }
   | { readonly type: 'phaseChanged'; readonly phase: CombatState['phase']; readonly turn: number }
   | { readonly type: 'combatEnded'; readonly status: 'won' | 'lost' }
+  /** Walked through a door into the next room (the renderer rebuilds the scene). */
+  | { readonly type: 'roomEntered'; readonly depth: number; readonly kind: RoomKind }
+  | { readonly type: 'rewardOffered'; readonly options: readonly RewardOption[] }
+  | { readonly type: 'rewardTaken'; readonly option: RewardOption | null }
+  | { readonly type: 'doorsOpened'; readonly doors: readonly DoorOffer[] }
+  | { readonly type: 'runEnded'; readonly result: 'won' | 'lost' }
   | { readonly type: 'debug'; readonly action: DebugAction | 'grant' | 'modifier' }
   | { readonly type: 'rejected'; readonly reason: RejectReason };

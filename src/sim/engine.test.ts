@@ -76,7 +76,7 @@ describe('Knight', () => {
       { abilities: ['knight.challenge'], intents: true },
     );
     const r = apply(s, use('knight.challenge'));
-    expect(r.state.players[0]!.hp).toBe(12);
+    expect(r.state.players[0]!.hp).toBe(16);
     expect(of(r.events, 'damaged').find((e) => e.type === 'damaged' && e.unitId === 'p1')).toMatchObject({
       amount: 0,
       absorbed: 2,
@@ -154,12 +154,12 @@ describe('Necromancer', () => {
     const r = apply(s, use('necro.sacrifice', { x: 2, y: 2 }));
     expect(r.state.allies).toEqual([]);
     expect(unit(r.state, 'e1')?.hp).toBe(1);
-    expect(r.state.players[0]!.hp).toBe(9);
+    expect(r.state.players[0]!.hp).toBe(13);
   });
 });
 
 describe('Rogue', () => {
-  it('Dagger: 1 damage and Bleeding (1 damage at the end of the turn)', () => {
+  it('Dagger: 2 damage and Bleeding (1 damage at the end of the turn)', () => {
     const s = stateFromMap(
       `
       ######
@@ -169,7 +169,7 @@ describe('Rogue', () => {
       ROGUE,
     );
     const r = apply(s, use('rogue.dagger'));
-    expect(r.state.enemies[0]!.hp).toBe(2);
+    expect(r.state.enemies[0]!.hp).toBe(1);
     expect(of(r.events, 'triggered')).toContainEqual(expect.objectContaining({ rule: 'bleed' }));
   });
 
@@ -185,7 +185,7 @@ describe('Rogue', () => {
     s.enemies[0]!.dir = 0; // facing away from the rogue
     const r = apply(s, use('rogue.dagger'));
     const hit = of(r.events, 'damaged')[0];
-    expect(hit).toMatchObject({ unitId: 'e1', amount: 2, backstab: true });
+    expect(hit).toMatchObject({ unitId: 'e1', amount: 4, backstab: true });
   });
 
   it('Shadow step lands behind the enemy facing it; the next dagger is a backstab', () => {
@@ -236,7 +236,7 @@ describe('Rogue', () => {
       { ...ROGUE, abilities: ['rogue.swap'], intents: true },
     );
     const r = apply(s, use('rogue.swap', { x: 2, y: 1 }));
-    expect(r.state.players[0]).toMatchObject({ x: 2, y: 1, hp: 10 });
+    expect(r.state.players[0]).toMatchObject({ x: 2, y: 1, hp: 13 });
     expect(of(r.events, 'enemyAttack')[0]).toMatchObject({ cells: [{ x: 2, y: 3 }] });
   });
 });
@@ -253,7 +253,7 @@ describe('Allies and enemy targets', () => {
       NECRO,
     );
     const r = apply(s, step('left'));
-    expect(unit(r.state, 'e1')?.hp).toBe(3);
+    expect(unit(r.state, 'e1')?.hp).toBe(2);
     const order = r.events.map((e) => e.type);
     expect(order.indexOf('allyAttack')).toBeLessThan(Math.max(order.indexOf('intentDeclared'), 0) || Infinity);
   });

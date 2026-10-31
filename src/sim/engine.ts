@@ -1,5 +1,6 @@
 import { add, dirVec, getCell, type CellType, type Dir, type Vec2 } from '../core/grid';
 import {
+  getEnemy,
   getModifier,
   getPassive,
   getStatus,
@@ -226,7 +227,10 @@ export function push(
 ): void {
   const { state, events } = eng;
   const step = dirVec(dir);
-  const total = distance + statOf(state, source ?? undefined, 'pushDistance');
+  const raw = distance + statOf(state, source ?? undefined, 'pushDistance');
+  // Heavy enemies (bosses) are pushed a fraction as far.
+  const factor = isEnemy(state, unit) ? (getEnemy(unit.type).pushFactor ?? 1) : 1;
+  const total = Math.floor(raw * factor);
   const collisionDamage = PUSH_COLLISION_DAMAGE + statOf(state, source ?? undefined, 'pushCollisionBonus');
   for (let i = 0; i < total; i++) {
     if (!isAlive(state, unit)) return;
@@ -528,6 +532,7 @@ export function runEffects(eng: Engine, effects: readonly EffectSpec[], context:
           type: 'summoned',
           unitId: ally.id,
           summon: def.id,
+          side: 'heroes',
           owner: owner.id,
           at: { x: cell.x, y: cell.y },
           dir: ally.dir,
