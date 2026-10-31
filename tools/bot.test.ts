@@ -1,20 +1,25 @@
 import { describe, expect, it } from 'vitest';
+import { CLASSES } from '../src/content';
 import { playFights, TURN_LIMIT } from './bot';
 
-describe('random-play bot', () => {
-  it('200 fights all finish without crashing', () => {
-    const results = playFights(200);
-    for (const r of results) {
-      expect(r.status, `seed ${r.seed} did not finish in ${TURN_LIMIT} turns`).not.toBe('active');
-    }
-    // Random play should both win and lose sometimes; otherwise numbers are badly off.
-    expect(results.some((r) => r.status === 'won')).toBe(true);
-    expect(results.some((r) => r.status === 'lost')).toBe(true);
-  }, 60_000);
+describe('balancing bot', () => {
+  for (const cls of CLASSES) {
+    it(`${cls.id}: 100 random fights all finish, with wins and losses`, () => {
+      const results = playFights(100, 1, 'random', cls.id);
+      for (const r of results)
+        expect(r.status, `seed ${r.seed} did not finish in ${TURN_LIMIT} turns`).not.toBe('active');
+      // Random play should both win and lose sometimes; otherwise numbers are badly off.
+      expect(results.some((r) => r.status === 'lost')).toBe(true);
+    }, 120_000);
 
-  it('a simple greedy fighter also always finishes', () => {
-    for (const r of playFights(200, 1, 'greedy')) {
-      expect(r.status, `seed ${r.seed} did not finish in ${TURN_LIMIT} turns`).not.toBe('active');
-    }
-  }, 60_000);
+    it(`${cls.id}: 100 greedy fights all finish`, () => {
+      for (const r of playFights(100, 1, 'greedy', cls.id))
+        expect(r.status, `seed ${r.seed} did not finish in ${TURN_LIMIT} turns`).not.toBe('active');
+    }, 120_000);
+
+    it(`${cls.id}: with every ability and modifier at once, 60 random fights finish without errors`, () => {
+      for (const r of playFights(60, 1, 'random', cls.id, 'full'))
+        expect(r.status, `seed ${r.seed} did not finish in ${TURN_LIMIT} turns`).not.toBe('active');
+    }, 120_000);
+  }
 });

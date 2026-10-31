@@ -1,7 +1,7 @@
 import { add, dirVec, floodFill, getCell, index, type Vec2 } from '../core/grid';
 import { int, shuffle, weighted, type Rng } from '../core/rng';
-import { ENEMIES, getEnemy } from '../content';
-import type { Enemy, GameState } from './state';
+import { ENEMIES, getEnemy, ROOM_CORPSES } from '../content';
+import type { Enemy, GameState, Surface } from './state';
 
 /** Minimum distance (both walking and straight-line) between the players and any enemy at spawn. */
 export const MIN_SPAWN_DISTANCE = 3;
@@ -68,9 +68,32 @@ export function placeEncounter(rng: Rng, state: GameState): Enemy[] {
       dir: int(rng, 0, 3) as 0 | 1 | 2 | 3,
       hp: getEnemy(def.id).maxHp,
       maxHp: getEnemy(def.id).maxHp,
+      statuses: [],
       intent: null,
       moved: false,
     });
   }
   return enemies;
+}
+
+/**
+ * Old corpses lying around the crypt at the start of a fight: something for the Necromancer to raise.
+ * On free floor cells away from units and doorways; uses its own RNG fork so enemy placement is unchanged.
+ */
+export function placeCorpses(rng: Rng, state: GameState): Surface[] {
+  const g = state.room.grid;
+  const doorCells = new Set(state.room.doors.map((d) => index(g, d.x + dirVec(d.dir).x, d.y + dirVec(d.dir).y)));
+  const reachable = floodFill(g, state.room.spawn, (t) => t === 'floor');
+  const units = [...state.players, ...state.enemies];
+  const candidates: Vec2[] = [];
+  for (let y = 0; y < g.h; y++)
+    for (let x = 0; x < g.w; x++) {
+      const i = index(g, x, y);
+      if (getCell(g, x, y) !== 'floor' || !reachable[i] || doorCells.has(i)) continue;
+      if (units.some((u) => Math.abs(u.x - x) + Math.abs(u.y - y) < 2)) continue;
+      candidates.push({ x, y });
+    }
+  return shuffle(rng, candidates)
+    .slice(0, ROOM_CORPSES)
+    .map((c) => ({ id: 'corpse', x: c.x, y: c.y, turns: null, side: 'neutral' as const }));
 }

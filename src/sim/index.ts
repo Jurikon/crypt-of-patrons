@@ -4,15 +4,22 @@ export type { Command, DebugAction, GameEvent, MoveDir, RejectReason, TurnDir } 
 export {
   createGame,
   findPlayer,
+  hasStatus,
+  isAlly,
   isPlayer,
+  surfaceAt,
   unitAt,
   unitById,
   STATE_VERSION,
+  type Ally,
   type Enemy,
   type GameState,
   type Intent,
   type Player,
+  type StatusInstance,
+  type Surface,
   type Unit,
 } from './state';
-export { cooldownOf } from './units';
+export { cooldownOf, statOf } from './units';
+export { validTargets } from './targeting';
 export { generateRoom, ROOM_SHAPES, type Door, type Room, type RoomShape } from './gen/room';

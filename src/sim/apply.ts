@@ -1,10 +1,21 @@
-import { add, dirVec, getCell, isWalkable, rotateDir } from '../core/grid';
-import { ABILITIES, getAbility } from '../content';
-import { advanceEnemies, intentCells } from './ai';
+import { add, dirVec, getCell, isWalkable, rotateDir, type Vec2 } from '../core/grid';
+import { ABILITIES, ABILITY_SLOTS, getAbility, MODIFIERS } from '../content';
+import { actAllies, advanceEnemies, intentCells } from './ai';
 import type { Command, GameEvent, MoveDir, RejectReason } from './commands';
-import { runEffects } from './effects';
+import {
+  createEngine,
+  dealDamage,
+  emitTurn,
+  killUnit,
+  moved,
+  runEffects,
+  settle,
+  tickDurations,
+  type Engine,
+} from './engine';
 import { isPlayer, unitAt, type GameState, type Player } from './state';
-import { checkCombatEnd, cooldownOf, dealDamage, kill, setCooldown, tickCooldowns } from './units';
+import { actionDir, validTargets } from './targeting';
+import { checkCombatEnd, cooldownOf, setCooldown, tickCooldowns } from './units';
 
 export interface ApplyResult {
   readonly state: GameState;
@@ -18,12 +29,13 @@ const MOVE_ROTATION: Record<MoveDir, number> = { forward: 0, right: 1, back: 2, 
  * Pure: the input state is never modified; a new state is returned with the events produced.
  * A rejected command returns the input state unchanged plus a `rejected` event.
  *
- * Turn structure: a step or an ability takes one turn, and the world answers immediately (`worldTurn`).
- * Turning in place and bumping into a wall take no time.
+ * Turn structure: a step or an ability takes one turn, and the world answers immediately (`worldTurn`),
+ * unless the action was free. Turning in place and bumping into a wall take no time.
  */
 export function apply(prev: GameState, command: Command): ApplyResult {
   const state = structuredClone(prev);
   const events: GameEvent[] = [];
+  const eng = createEngine(state, events);
   const reject = (reason: RejectReason): ApplyResult => ({ state: prev, events: [{ type: 'rejected', reason }] });
 
   const player = state.players.find((p) => p.id === command.playerId);
@@ -43,19 +55,24 @@ export function apply(prev: GameState, command: Command): ApplyResult {
       const cell = getCell(state.room.grid, to.x, to.y);
       const occupant = unitAt(state, to.x, to.y);
       const baseAttack = player.abilities[0];
-      if (command.dir === 'forward' && occupant && !isPlayer(state, occupant) && baseAttack && isActive(state)) {
+      const foe = occupant && !isPlayer(state, occupant) && !state.allies.includes(occupant as never);
+      if (command.dir === 'forward' && foe && baseAttack && isActive(state)) {
         // Walking into an enemy attacks it with the base attack (classic roguelike bump-attack).
-        const r = useAbility(state, player, baseAttack, events);
+        const free = player.freeActions > 0;
+        const r = useAbility(eng, player, baseAttack, to);
         if (r) return reject(r);
-        worldTurn(state, events);
+        endAction(eng, player, free);
       } else if (isWalkable(cell) && !occupant) {
+        const free = player.freeActions > 0;
         const from = { x: player.x, y: player.y };
         player.x = to.x;
         player.y = to.y;
         events.push({ type: 'moved', unitId: player.id, from, to });
-        if (isActive(state)) worldTurn(state, events);
+        moved(eng, player, from, player, []);
+        settle(eng);
+        if (isActive(state)) endAction(eng, player, free);
       } else {
-        // Bumping into a wall costs nothing.
+        // Bumping into a wall (or your own skeleton) costs nothing.
         events.push({ type: 'bumped', unitId: player.id, at: to, cell });
       }
       break;
@@ -63,9 +80,10 @@ export function apply(prev: GameState, command: Command): ApplyResult {
     case 'useAbility': {
       if (!isActive(state)) return reject('combat_over');
       if (player.hp <= 0) return reject('dead');
-      const r = useAbility(state, player, command.abilityId, events);
+      const free = player.freeActions > 0;
+      const r = useAbility(eng, player, command.abilityId, command.target ?? null);
       if (r) return reject(r);
-      worldTurn(state, events);
+      endAction(eng, player, free);
       break;
     }
     case 'debug': {
@@ -75,8 +93,27 @@ export function apply(prev: GameState, command: Command): ApplyResult {
       } else if (command.action === 'toggleGod') {
         player.god = !player.god;
       } else if (command.action === 'killAll') {
-        for (const e of [...state.enemies]) if (isActive(state)) kill(state, e, events);
+        for (const e of [...state.enemies]) if (isActive(state)) killUnit(eng, e, null, []);
+        settle(eng);
       }
+      break;
+    }
+    case 'debugGrant': {
+      if (!ABILITIES.some((a) => a.id === command.abilityId)) return reject('unknown_ability');
+      if (command.slot < 1 || command.slot > ABILITY_SLOTS) return reject('unknown_ability');
+      const list = player.abilities.filter((id) => id !== command.abilityId);
+      while (list.length <= command.slot) list.push('');
+      list[command.slot] = command.abilityId;
+      player.abilities = list.filter((id, i) => id !== '' || i === 0);
+      events.push({ type: 'debug', action: 'grant' });
+      break;
+    }
+    case 'debugModifier': {
+      if (!MODIFIERS.some((m) => m.id === command.modifierId)) return reject('unknown_command');
+      player.modifiers = player.modifiers.includes(command.modifierId)
+        ? player.modifiers.filter((m) => m !== command.modifierId)
+        : [...player.modifiers, command.modifierId];
+      events.push({ type: 'debug', action: 'modifier' });
       break;
     }
     default: {
@@ -88,29 +125,53 @@ export function apply(prev: GameState, command: Command): ApplyResult {
 }
 
 const isActive = (state: GameState) => state.combat.status === 'active';
+const same = (a: Vec2, b: Vec2) => a.x === b.x && a.y === b.y;
 
-/** Runs an ability's effects. Returns a reject reason instead if it cannot be used. */
-function useAbility(state: GameState, player: Player, abilityId: string, events: GameEvent[]): RejectReason | null {
+/** Runs an ability on a target cell (or its default target). Returns a reject reason instead if it cannot be used. */
+function useAbility(eng: Engine, player: Player, abilityId: string, target: Vec2 | null): RejectReason | null {
+  const { state, events } = eng;
   if (!player.abilities.includes(abilityId) || !ABILITIES.some((a) => a.id === abilityId)) return 'unknown_ability';
   const ability = getAbility(abilityId);
   if (cooldownOf(player, ability.id) > 0) return 'on_cooldown';
+  const valid = validTargets(state, player, ability);
+  const chosen = target ?? valid[0] ?? null;
+  if (!chosen) return 'no_target';
+  if (!valid.some((c) => same(c, chosen))) return 'invalid_target';
+
   // +1 because the turn this ability is used on ticks once as the world answers.
   setCooldown(player, ability.id, ability.cooldown > 0 ? ability.cooldown + 1 : 0);
-  const target = add(player, dirVec(player.dir));
-  events.push({ type: 'abilityUsed', unitId: player.id, abilityId: ability.id, target, dir: player.dir });
-  runEffects(state, ability.effects, { source: player, target, dir: player.dir }, events);
+  const dir = actionDir(player, ability, chosen);
+  if (dir !== player.dir) {
+    events.push({ type: 'turned', unitId: player.id, from: player.dir, to: dir });
+    player.dir = dir;
+  }
+  events.push({ type: 'abilityUsed', unitId: player.id, abilityId: ability.id, target: chosen, dir });
+  runEffects(eng, ability.effects, { source: player, target: chosen, dir, tags: ability.tags, event: null });
+  settle(eng);
   return null;
 }
 
+/** After an action: a free one ends here; otherwise the world answers. */
+function endAction(eng: Engine, player: Player, free: boolean): void {
+  if (free && isActive(eng.state)) {
+    player.freeActions--;
+    eng.events.push({ type: 'freeActionUsed', unitId: player.id });
+    return;
+  }
+  worldTurn(eng);
+}
+
 /**
- * The world's answer to one player turn: enemies strike with the attacks they telegraphed, then move
- * and telegraph the next ones. Then the next player turn starts.
+ * The world's answer to one player turn: allies act, enemies strike with the attacks they telegraphed,
+ * then move and telegraph the next ones; statuses tick. Then the next player turn starts.
  */
-function worldTurn(state: GameState, events: GameEvent[]): void {
+function worldTurn(eng: Engine): void {
+  const { state, events } = eng;
   if (!isActive(state)) return;
   state.combat.phase = 'enemy';
   events.push({ type: 'phaseChanged', phase: 'enemy', turn: state.combat.turn });
 
+  actAllies(eng);
   for (const id of state.enemies.map((e) => e.id)) {
     const e = state.enemies.find((x) => x.id === id);
     if (!e || !e.intent || !isActive(state)) continue;
@@ -118,11 +179,17 @@ function worldTurn(state: GameState, events: GameEvent[]): void {
     const { cells, hit } = intentCells(state, e, intent);
     events.push({ type: 'enemyAttack', unitId: e.id, intent, cells });
     e.intent = null;
-    if (hit) dealDamage(state, hit, intent.damage, 'attack', events);
+    if (hit) dealDamage(eng, hit, intent.damage, e, 'attack', intent.kind === 'melee' ? ['melee'] : ['projectile']);
+    settle(eng);
   }
   if (!isActive(state)) return;
 
-  advanceEnemies(state, events);
+  advanceEnemies(eng);
+  if (!isActive(state)) return;
+
+  emitTurn(eng, 'turnEnd');
+  settle(eng);
+  tickDurations(eng);
   checkCombatEnd(state, events);
   if (!isActive(state)) return;
 
@@ -130,6 +197,8 @@ function worldTurn(state: GameState, events: GameEvent[]): void {
   state.combat.phase = 'player';
   for (const p of state.players) tickCooldowns(p);
   events.push({ type: 'phaseChanged', phase: 'player', turn: state.combat.turn });
+  emitTurn(eng, 'turnStart');
+  settle(eng);
 }
 
 /** Replays a command list from a fresh state. Used by tests and by bug reports (seed + commands). */
@@ -141,15 +210,22 @@ export function replay(initial: GameState, commands: readonly Command[]): GameSt
 
 /**
  * What a command would do, without committing it: the same `apply` on the same state (GDD: preview is free
- * because the simulation is deterministic). Summarised per unit for the UI; covers the player's action only.
+ * because the simulation is deterministic), trigger chains included. Covers the player's action only.
  */
 export interface Preview {
   readonly events: readonly GameEvent[];
-  /** Total damage per unit id, in event order. */
+  /** Total damage per unit id, in event order (shield-absorbed points not included). */
   readonly damage: ReadonlyMap<string, number>;
   readonly deaths: ReadonlySet<string>;
   /** Cells each pushed unit passes through, per unit id. */
-  readonly pushPaths: ReadonlyMap<string, readonly { x: number; y: number }[]>;
+  readonly pushPaths: ReadonlyMap<string, readonly Vec2[]>;
+  /** Statuses each unit would get. */
+  readonly statuses: ReadonlyMap<string, readonly string[]>;
+  /** Explosion cells. */
+  readonly areas: readonly Vec2[];
+  /** Where the player would end up, if the action moves them. */
+  readonly playerTo: Vec2 | null;
+  readonly freeAction: boolean;
   readonly rejected: RejectReason | null;
 }
 
@@ -160,13 +236,22 @@ export function preview(state: GameState, command: Command): Preview {
   const events = cut >= 0 ? all.slice(0, cut) : all;
   const damage = new Map<string, number>();
   const deaths = new Set<string>();
-  const pushPaths = new Map<string, { x: number; y: number }[]>();
+  const pushPaths = new Map<string, Vec2[]>();
+  const statuses = new Map<string, string[]>();
+  const areas: Vec2[] = [];
+  let playerTo: Vec2 | null = null;
+  let freeAction = false;
   let rejected: RejectReason | null = null;
   for (const e of events) {
     if (e.type === 'damaged') damage.set(e.unitId, (damage.get(e.unitId) ?? 0) + e.amount);
     else if (e.type === 'died') deaths.add(e.unitId);
     else if (e.type === 'pushed') pushPaths.set(e.unitId, [...(pushPaths.get(e.unitId) ?? []), e.to]);
+    else if (e.type === 'statusApplied') statuses.set(e.unitId, [...(statuses.get(e.unitId) ?? []), e.status]);
+    else if (e.type === 'area') areas.push(...e.cells);
+    else if ((e.type === 'teleported' || e.type === 'moved' || e.type === 'swapped') && e.unitId === command.playerId)
+      playerTo = e.to;
+    else if (e.type === 'freeActionGained') freeAction = true;
     else if (e.type === 'rejected') rejected = e.reason;
   }
-  return { events, damage, deaths, pushPaths, rejected };
+  return { events, damage, deaths, pushPaths, statuses, areas, playerTo, freeAction, rejected };
 }

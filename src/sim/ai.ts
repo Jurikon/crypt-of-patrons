@@ -1,7 +1,7 @@
 import { add, dirVec, getCell, index, DIRS, type Dir, type Vec2 } from '../core/grid';
-import { getEnemy, type AttackSpec } from '../content';
-import type { GameEvent } from './commands';
-import { unitAt, type Enemy, type GameState, type Intent, type Player, type Unit } from './state';
+import { getEnemy, getStatus, getSummon, type AttackSpec } from '../content';
+import { dealDamage, moved, settle, type Engine } from './engine';
+import { unitAt, unitById, type Ally, type Enemy, type GameState, type Intent, type Unit } from './state';
 
 /**
  * Enemy behaviour. Fully deterministic: fixed enemy order, BFS with a fixed neighbour order,
@@ -46,14 +46,34 @@ export function dirTowards(from: Vec2, to: Vec2): Dir {
   return dy > 0 ? 2 : 0;
 }
 
-function livingPlayers(state: GameState): Player[] {
+function livingPlayers(state: GameState): Unit[] {
   return state.players.filter((p) => p.hp > 0);
 }
 
-function nearestPlayer(state: GameState, from: Vec2): Player | undefined {
-  let best: Player | undefined;
-  for (const p of livingPlayers(state)) if (!best || manhattan(from, p) < manhattan(from, best)) best = p;
+function nearestOf(units: readonly Unit[], from: Vec2): Unit | undefined {
+  let best: Unit | undefined;
+  for (const u of units) if (!best || manhattan(from, u) < manhattan(from, best)) best = u;
   return best;
+}
+
+function nearestPlayer(state: GameState, from: Vec2): Unit | undefined {
+  return nearestOf(livingPlayers(state), from);
+}
+
+const isStunned = (u: Unit) => u.statuses.some((s) => getStatus(s.id).stun);
+
+/**
+ * Who an enemy goes after: whoever taunted it, else the nearest player or summon (players win ties,
+ * because they come first in the list).
+ */
+function targetsFor(state: GameState, e: Enemy): Unit[] {
+  for (const s of e.statuses) {
+    if (!getStatus(s.id).taunt || !s.sourceId) continue;
+    const u = unitById(state, s.sourceId);
+    if (u && u.hp > 0) return [u];
+  }
+  const t = nearestOf([...livingPlayers(state), ...state.allies], e);
+  return t ? [t] : [];
 }
 
 interface Bfs {
@@ -159,9 +179,8 @@ interface Plan {
   readonly face: Dir;
 }
 
-function planMelee(state: GameState, e: Enemy, move: number): Plan {
+function planMelee(state: GameState, e: Unit, move: number, players: readonly Unit[]): Plan {
   const b = bfs(state, e);
-  const players = livingPlayers(state);
   const adjacentTo = (c: Vec2) => players.find((p) => manhattan(c, p) === 1);
   // Prefer a cell next to a player; otherwise get as close as possible.
   const g = state.room.grid;
@@ -192,7 +211,7 @@ function planMelee(state: GameState, e: Enemy, move: number): Plan {
     }
     // Completely blocked off: shuffle as close as possible by straight-line distance.
     target = chooseCell(state, b, move, (c) => {
-      const p = nearestPlayer(state, c);
+      const p = nearestOf(players, c);
       return p ? [manhattan(c, p)] : [0];
     });
   }
@@ -207,12 +226,18 @@ function planMelee(state: GameState, e: Enemy, move: number): Plan {
   return { path, face };
 }
 
-function planRanged(state: GameState, e: Enemy, move: number, minRange: number, maxRange: number): Plan {
+function planRanged(
+  state: GameState,
+  e: Enemy,
+  move: number,
+  minRange: number,
+  maxRange: number,
+  players: readonly Unit[],
+): Plan {
   const b = bfs(state, e);
-  const players = livingPlayers(state);
   const ideal = Math.round((minRange + maxRange) / 2) - 1;
-  const lineScore = (c: Vec2): { score: number[]; victim: Player } | null => {
-    let best: { score: number[]; victim: Player } | null = null;
+  const lineScore = (c: Vec2): { score: number[]; victim: Unit } | null => {
+    let best: { score: number[]; victim: Unit } | null = null;
     for (const p of players) {
       if (c.x !== p.x && c.y !== p.y) continue;
       const d = manhattan(c, p);
@@ -235,18 +260,18 @@ function planRanged(state: GameState, e: Enemy, move: number, minRange: number, 
     if (goal !== null) {
       const path = pathTo(state, b, goal).slice(0, move);
       const end = path[path.length - 1] ?? { x: e.x, y: e.y };
-      const p = nearestPlayer(state, end);
+      const p = nearestOf(players, end);
       return { path, face: p ? dirTowards(end, p) : e.dir };
     }
     // No firing position anywhere (walled off): just get closer.
     target = chooseCell(state, b, move, (c) => {
-      const p = nearestPlayer(state, c);
+      const p = nearestOf(players, c);
       return p ? [manhattan(c, p)] : [0];
     });
   }
   const path = target === null ? [] : pathTo(state, b, target);
   const end = path[path.length - 1] ?? { x: e.x, y: e.y };
-  const aimed = lineScore(end)?.victim ?? nearestPlayer(state, end);
+  const aimed = lineScore(end)?.victim ?? nearestOf(players, end);
   return { path, face: aimed ? dirTowards(end, aimed) : e.dir };
 }
 
@@ -256,28 +281,70 @@ function dirFromStep(from: Vec2, to: Vec2): Dir {
 
 function plan(state: GameState, e: Enemy): Plan {
   const def = getEnemy(e.type);
+  const targets = targetsFor(state, e);
   return def.behavior.kind === 'melee'
-    ? planMelee(state, e, def.move)
-    : planRanged(state, e, e.moved ? 0 : def.move, def.behavior.minRange, def.behavior.maxRange);
+    ? planMelee(state, e, def.move, targets)
+    : planRanged(state, e, e.moved ? 0 : def.move, def.behavior.minRange, def.behavior.maxRange, targets);
 }
 
-/** Enemy phase, second half: every enemy moves, turns and telegraphs its next attack. */
-export function advanceEnemies(state: GameState, events: GameEvent[]): void {
+/** Walks a unit along a planned path, then turns it. Steps can set off traps, so triggers settle after each. */
+function walk(eng: Engine, u: Unit, { path, face }: Plan): void {
+  const { state, events } = eng;
+  for (const step of path) {
+    if (!state.enemies.includes(u as Enemy) && !state.allies.includes(u as Ally)) return;
+    const from = { x: u.x, y: u.y };
+    u.x = step.x;
+    u.y = step.y;
+    events.push({ type: 'moved', unitId: u.id, from, to: { x: u.x, y: u.y } });
+    moved(eng, u, from, u, []);
+    settle(eng);
+  }
+  if (face !== u.dir) {
+    events.push({ type: 'turned', unitId: u.id, from: u.dir, to: face });
+    u.dir = face;
+  }
+}
+
+/**
+ * Allies act right after the players: hit an adjacent enemy, otherwise step towards the nearest one.
+ * They strike at once instead of telegraphing; enemies are the ones that must be readable.
+ */
+export function actAllies(eng: Engine): void {
+  const { state, events } = eng;
+  for (const id of state.allies.map((a) => a.id)) {
+    const a = state.allies.find((x) => x.id === id);
+    if (!a || isStunned(a) || state.combat.status !== 'active') continue;
+    const adjacent = state.enemies.find((e) => manhattan(e, a) === 1);
+    if (adjacent) {
+      const face = dirTowards(a, adjacent);
+      if (face !== a.dir) {
+        events.push({ type: 'turned', unitId: a.id, from: a.dir, to: face });
+        a.dir = face;
+      }
+      events.push({ type: 'allyAttack', unitId: a.id, target: { x: adjacent.x, y: adjacent.y } });
+      dealDamage(eng, adjacent, getSummon(a.type).damage, a, 'attack', ['melee']);
+      settle(eng);
+      continue;
+    }
+    const foe = nearestOf(state.enemies, a);
+    if (foe) walk(eng, a, planMelee(state, a, 1, [foe]));
+  }
+}
+
+/** Enemy phase, second half: every enemy moves, turns and telegraphs its next attack. Stunned ones skip. */
+export function advanceEnemies(eng: Engine): void {
+  const { state, events } = eng;
   for (const id of state.enemies.map((e) => e.id)) {
     const e = state.enemies.find((x) => x.id === id);
-    if (!e || livingPlayers(state).length === 0) continue;
-    const { path, face } = plan(state, e);
-    for (const step of path) {
-      const from = { x: e.x, y: e.y };
-      e.x = step.x;
-      e.y = step.y;
-      events.push({ type: 'moved', unitId: e.id, from, to: { x: e.x, y: e.y } });
+    if (!e || livingPlayers(state).length === 0 || state.combat.status !== 'active') continue;
+    if (isStunned(e)) {
+      e.moved = false;
+      continue;
     }
-    if (face !== e.dir) {
-      events.push({ type: 'turned', unitId: e.id, from: e.dir, to: face });
-      e.dir = face;
-    }
-    e.moved = path.length > 0;
+    const p = plan(state, e);
+    walk(eng, e, p);
+    if (!state.enemies.includes(e)) continue; // died on a trap
+    e.moved = p.path.length > 0;
     // A ranged enemy either moves or aims in one turn, never both, and after a move it stands for a turn:
     // otherwise it kites forever at the player's own speed.
     if (e.moved && getEnemy(e.type).behavior.kind === 'ranged') continue;

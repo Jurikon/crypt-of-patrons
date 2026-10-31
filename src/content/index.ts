@@ -1,8 +1,12 @@
-import type { AbilityDef, ClassDef, EnemyDef, PassiveDef } from './types';
+import type { AbilityDef, ClassDef, EnemyDef, RuleDef, StatusDef, SummonDef, SurfaceDef } from './types';
 
 export type * from './types';
 
+/** Explosions (Sacrifice, exploding summons): the four neighbouring cells, sparing your own side's players. */
+const BLAST = { kind: 'around', radius: 1, filter: 'notAlliedPlayers' } as const;
+
 export const ABILITIES: readonly AbilityDef[] = [
+  // ---- Knight: push, block, provoke ----
   {
     id: 'knight.sword',
     nameKey: 'ability.knight.sword',
@@ -22,14 +26,226 @@ export const ABILITIES: readonly AbilityDef[] = [
       { kind: 'push', distance: 2 },
     ],
   },
+  {
+    id: 'knight.dash',
+    nameKey: 'ability.knight.dash',
+    tags: ['movement', 'push'],
+    cooldown: 3,
+    target: { kind: 'self' },
+    effects: [
+      {
+        kind: 'dash',
+        distance: 3,
+        onImpact: [
+          { kind: 'damage', amount: 1 },
+          { kind: 'push', distance: 1 },
+          { kind: 'status', status: 'stun', turns: 1 },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'knight.challenge',
+    nameKey: 'ability.knight.challenge',
+    tags: ['defense'],
+    cooldown: 4,
+    target: { kind: 'self' },
+    effects: [
+      { kind: 'status', status: 'taunt', turns: 2, to: { kind: 'around', center: 'self', radius: 3, filter: 'foes' } },
+      { kind: 'shield', amount: 2, turns: 3, to: { kind: 'self' } },
+    ],
+  },
+
+  // ---- Necromancer: raise, sacrifice, curse ----
+  {
+    id: 'necro.staff',
+    nameKey: 'ability.necro.staff',
+    tags: ['melee'],
+    cooldown: 0,
+    target: { kind: 'front' },
+    effects: [{ kind: 'damage', amount: 1 }],
+  },
+  {
+    id: 'necro.raise',
+    nameKey: 'ability.necro.raise',
+    tags: ['summon'],
+    cooldown: 2,
+    target: { kind: 'cell', range: 3, surface: 'corpse' },
+    effects: [{ kind: 'summon', unit: 'necro.skeleton', at: 'target', consumes: 'corpse' }],
+  },
+  {
+    id: 'necro.boneSpear',
+    nameKey: 'ability.necro.boneSpear',
+    tags: ['projectile', 'curse'],
+    cooldown: 2,
+    target: { kind: 'line', range: 5 },
+    effects: [
+      {
+        kind: 'projectile',
+        range: 5,
+        onHit: [
+          { kind: 'damage', amount: 2 },
+          { kind: 'status', status: 'vulnerable', turns: 2 },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'necro.sacrifice',
+    nameKey: 'ability.necro.sacrifice',
+    tags: ['summon', 'area'],
+    cooldown: 1,
+    target: { kind: 'unit', range: 4, filter: 'ownSummons', sight: false },
+    effects: [
+      { kind: 'damage', amount: 3, to: { ...BLAST, center: 'target' } },
+      { kind: 'kill', to: { kind: 'target' } },
+    ],
+  },
+
+  // ---- Rogue: move, swap, strike from behind ----
+  {
+    id: 'rogue.dagger',
+    nameKey: 'ability.rogue.dagger',
+    tags: ['melee'],
+    cooldown: 0,
+    target: { kind: 'front' },
+    effects: [
+      { kind: 'damage', amount: 1 },
+      { kind: 'status', status: 'bleed', turns: 2 },
+    ],
+  },
+  {
+    id: 'rogue.shadowStep',
+    nameKey: 'ability.rogue.shadowStep',
+    tags: ['movement'],
+    cooldown: 3,
+    target: { kind: 'unit', range: 3, filter: 'foes', sight: false, freeBehind: true },
+    effects: [{ kind: 'teleportBehind' }],
+  },
+  {
+    id: 'rogue.knife',
+    nameKey: 'ability.rogue.knife',
+    tags: ['projectile'],
+    cooldown: 1,
+    target: { kind: 'line', range: 5 },
+    effects: [
+      {
+        kind: 'projectile',
+        range: 5,
+        onHit: [
+          { kind: 'damage', amount: 1 },
+          { kind: 'status', status: 'mark', turns: 3 },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'rogue.swap',
+    nameKey: 'ability.rogue.swap',
+    tags: ['movement'],
+    cooldown: 3,
+    target: { kind: 'unit', range: 4, filter: 'any', sight: true },
+    effects: [{ kind: 'swap' }],
+  },
 ];
 
-export const PASSIVES: readonly PassiveDef[] = [
+/** Class passives. */
+export const PASSIVES: readonly RuleDef[] = [
   {
     id: 'knight.bulwark',
     nameKey: 'passive.knight.bulwark',
     stats: [{ stat: 'pushCollisionBonus', add: 2 }],
+    triggers: [],
   },
+  {
+    id: 'necro.gravedigger',
+    nameKey: 'passive.necro.gravedigger',
+    stats: [],
+    triggers: [{ on: 'death', subject: 'foe', effects: [{ kind: 'surface', surface: 'corpse', at: 'subject' }] }],
+  },
+  {
+    id: 'rogue.backstab',
+    nameKey: 'passive.rogue.backstab',
+    stats: [{ stat: 'backstab', add: 1 }],
+    triggers: [],
+  },
+];
+
+/** Modifiers (GDD 2): rules that hook onto tags and events, never onto specific abilities. */
+export const MODIFIERS: readonly RuleDef[] = [
+  {
+    id: 'mod.explodingSummons',
+    nameKey: 'modifier.explodingSummons',
+    stats: [],
+    triggers: [
+      {
+        on: 'death',
+        subject: 'ownSummon',
+        effects: [{ kind: 'damage', amount: 3, to: { ...BLAST, center: 'subject' } }],
+      },
+    ],
+  },
+  {
+    id: 'mod.longPush',
+    nameKey: 'modifier.longPush',
+    stats: [{ stat: 'pushDistance', add: 1 }],
+    triggers: [],
+  },
+  {
+    id: 'mod.piercing',
+    nameKey: 'modifier.piercing',
+    stats: [{ stat: 'projectilePierce', add: 1 }],
+    triggers: [],
+  },
+  {
+    id: 'mod.trailTraps',
+    nameKey: 'modifier.trailTraps',
+    stats: [],
+    triggers: [
+      { on: 'moved', actor: 'owner', tags: ['movement'], effects: [{ kind: 'surface', surface: 'trap', at: 'from' }] },
+    ],
+  },
+  {
+    id: 'mod.markedKill',
+    nameKey: 'modifier.markedKill',
+    stats: [],
+    triggers: [{ on: 'kill', actor: 'owner', subjectStatus: 'mark', effects: [{ kind: 'freeAction' }] }],
+  },
+];
+
+export const STATUSES: readonly StatusDef[] = [
+  {
+    id: 'bleed',
+    nameKey: 'status.bleed',
+    icon: '🩸',
+    stats: [],
+    triggers: [{ on: 'turnEnd', subject: 'owner', effects: [{ kind: 'damage', amount: 1, to: { kind: 'self' } }] }],
+  },
+  { id: 'stun', nameKey: 'status.stun', icon: '💫', stats: [], triggers: [], stun: true },
+  { id: 'mark', nameKey: 'status.mark', icon: '🎯', stats: [], triggers: [] },
+  {
+    id: 'vulnerable',
+    nameKey: 'status.vulnerable',
+    icon: '💔',
+    stats: [{ stat: 'damageTaken', add: 1 }],
+    triggers: [],
+  },
+  { id: 'shield', nameKey: 'status.shield', icon: '🛡', stats: [], triggers: [], shield: true },
+  { id: 'taunt', nameKey: 'status.taunt', icon: '❗', stats: [], triggers: [], taunt: true },
+];
+
+export const SURFACES: readonly SurfaceDef[] = [
+  { id: 'corpse', nameKey: 'surface.corpse', triggers: [] },
+  {
+    id: 'trap',
+    nameKey: 'surface.trap',
+    singleUse: true,
+    triggers: [{ on: 'enterCell', subject: 'foe', effects: [{ kind: 'damage', amount: 2, to: { kind: 'subject' } }] }],
+  },
+];
+
+export const SUMMONS: readonly SummonDef[] = [
+  { id: 'necro.skeleton', nameKey: 'summon.skeleton', maxHp: 3, damage: 1, model: 'warrior', tags: ['summon'] },
 ];
 
 export const CLASSES: readonly ClassDef[] = [
@@ -39,6 +255,23 @@ export const CLASSES: readonly ClassDef[] = [
     maxHp: 12,
     abilities: ['knight.sword', 'knight.shieldBash'],
     passives: ['knight.bulwark'],
+    pool: ['knight.dash', 'knight.challenge'],
+  },
+  {
+    id: 'necromancer',
+    nameKey: 'class.necromancer',
+    maxHp: 9,
+    abilities: ['necro.staff', 'necro.raise'],
+    passives: ['necro.gravedigger'],
+    pool: ['necro.boneSpear', 'necro.sacrifice'],
+  },
+  {
+    id: 'rogue',
+    nameKey: 'class.rogue',
+    maxHp: 10,
+    abilities: ['rogue.dagger', 'rogue.shadowStep'],
+    passives: ['rogue.backstab'],
+    pool: ['rogue.knife', 'rogue.swap'],
   },
 ];
 
@@ -67,6 +300,12 @@ export const ENEMIES: readonly EnemyDef[] = [
 
 /** Base damage a pushed unit takes when it hits something; passives add to it. */
 export const PUSH_COLLISION_DAMAGE = 1;
+/** Maximum depth of a trigger chain; deeper links are logged and dropped (CLAUDE.md rule 5). */
+export const MAX_CHAIN_DEPTH = 32;
+/** Ability slots besides the base attack (GDD 2). */
+export const ABILITY_SLOTS = 4;
+/** Corpses lying around a crypt room at the start of a fight (the Necromancer can raise them). */
+export const ROOM_CORPSES = 2;
 
 function byId<T extends { readonly id: string }>(list: readonly T[], kind: string): (id: string) => T {
   return (id) => {
@@ -78,5 +317,9 @@ function byId<T extends { readonly id: string }>(list: readonly T[], kind: strin
 
 export const getAbility = byId(ABILITIES, 'ability');
 export const getPassive = byId(PASSIVES, 'passive');
+export const getModifier = byId(MODIFIERS, 'modifier');
+export const getStatus = byId(STATUSES, 'status');
+export const getSurface = byId(SURFACES, 'surface');
+export const getSummon = byId(SUMMONS, 'summon');
 export const getClass = byId(CLASSES, 'class');
 export const getEnemy = byId(ENEMIES, 'enemy');
