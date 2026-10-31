@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Эталон стиля: воксельная лавовая пещера</title>
+<!--
+  STYLE REFERENCE for Claude Code (M0).
+  This is a quick throwaway prototype approved by the project owner as the visual target.
+  Use it as the reference for LOOK AND FEEL only. Do NOT copy its architecture:
+  - it renders every voxel as an instance (the real game must use greedy meshing per chunk);
+  - it uses three.js r128 from CDN, MeshToonMaterial and sprite "glows" as a cheap bloom substitute
+    (the real game uses current three.js + pmndrs/postprocessing for bloom, outlines and AO);
+  - it mixes generation, rendering and animation in one file (the real game follows CLAUDE.md:
+    sim/core are pure and deterministic, render only reads state).
+  Approved settings: FULL resolution (no pixelated render), stylization ON.
+  Key look ingredients: warm palette with purple-maroon shadows and orange lights (hue shift),
+  stepped toon lighting (4 bands), dark outlines on characters, glow on lava/fire/eyes,
+  floating golden embers, warm fog, procedural rock strata, lava cracks and lava falls.
+-->
+<style>
+  html,body{margin:0;background:#0d0606;color:#d9c9b8;font:14px system-ui,sans-serif}
+  #wrap{position:relative;width:100vw;height:calc(100vh - 48px);cursor:grab;overflow:hidden}
+  #bar{height:48px;display:flex;align-items:center;gap:16px;padding:0 16px;box-sizing:border-box}
+  #bar span{margin-left:auto;opacity:.6}
+</style>
+</head>
+<body>
+<div id="wrap"></div>
+<div id="bar">
+  <label><input type="checkbox" id="cPix"> Пиксельный рендер</label>
+  <label><input type="checkbox" id="cSty" checked> Стилизация</label>
+  <span>Потяни мышью, чтобы осмотреться</span>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function(){
+const wrap=document.getElementById('wrap');const W=()=>wrap.clientWidth,H=()=>wrap.clientHeight;
+const renderer=new THREE.WebGLRenderer({antialias:false});
+const full=Math.min(window.devicePixelRatio||1,2);const PIX=()=>200/H();
+renderer.setPixelRatio(full);renderer.setSize(W(),H());
+renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.BasicShadowMap;renderer.outputEncoding=THREE.sRGBEncoding;
+const el=renderer.domElement;const fit=()=>{el.style.width='100%';el.style.height='100%';el.style.imageRendering='pixelated';};fit();wrap.appendChild(el);
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x140504);
+const fog=new THREE.FogExp2(0x1a0705,0.11);scene.fog=fog;
+const camera=new THREE.PerspectiveCamera(70,W()/H(),0.05,60);camera.rotation.order='YXZ';
+const vs=0.1,N=90,HT=26;
+function hs(a,b,c){let n=Math.imul(a|0,374761393)+Math.imul(b|0,668265263)+Math.imul(c|0,1274126177);n=Math.imul(n^(n>>>13),1274126177);n^=n>>>16;return (n>>>0)/4294967296;}
+function vn(x,y,s,seed){const fx=x/s,fy=y/s,ix=Math.floor(fx),iy=Math.floor(fy),tx=fx-ix,ty=fy-iy;const sx=tx*tx*(3-2*tx),sy=ty*ty*(3-2*ty);
+ const a=hs(ix,iy,seed),b=hs(ix+1,iy,seed),c=hs(ix,iy+1,seed),d=hs(ix+1,iy+1,seed);return a+(b-a)*sx+(c-a)*sy+(a-b-c+d)*sx*sy;}
+// Palette: dark purple -> maroon/brown -> warm orange
+function pal(t,k){const A=[0.13,0.06,0.11],B=[0.40,0.14,0.08],C=[0.70,0.36,0.14];let r,g,b;
+ if(t<0.5){const u=t*2;r=A[0]+(B[0]-A[0])*u;g=A[1]+(B[1]-A[1])*u;b=A[2]+(B[2]-A[2])*u;}else{const u=(t-0.5)*2;r=B[0]+(C[0]-B[0])*u;g=B[1]+(C[1]-B[1])*u;b=B[2]+(C[2]-B[2])*u;}
+ return [r*k,g*k,b*k];}
+const rockC=[],rockS=[],lava=[];const add=(L,x,y,z,c)=>L.push([x,y,z,c[0],c[1],c[2]]);
+const cols=[[22,32,3.6],[66,52,3.2]];const colDist=(x,z)=>Math.min.apply(null,cols.map(c=>Math.hypot(x-c[0],z-c[1])-c[2]));
+const wdepth=(side,u,h)=>1+Math.floor(vn(u,h,5,side+3)*3.2);
+const falls=[[16,22],[64,70]];const inFall=u=>falls.some(f=>u>=f[0]&&u<=f[1]);
+const edgeDist=(ix,iz)=>Math.min(ix,iz,N-1-ix,N-1-iz);
+function isCrack(ix,iz){const v=Math.abs(Math.sin(ix*0.17+Math.sin(iz*0.11)*3)+Math.sin(iz*0.07+ix*0.03));return v<0.09&&edgeDist(ix,iz)>5&&Math.hypot(ix-45,iz-82)>8;}
+for(let ix=0;ix<N;ix++)for(let iz=0;iz<N;iz++){
+ if(isCrack(ix,iz)){lava.push([ix,-1,iz,0,ix*0.3+iz*0.2,0]);continue;}
+ const t=0.25+vn(ix,iz,9,1)*0.45+(hs(ix,iz,2)-0.5)*0.12;const ao=Math.min(1,0.5+Math.min(edgeDist(ix,iz),Math.max(0,colDist(ix,iz)))*0.12);
+ const nearLava=(isCrack(ix+1,iz)||isCrack(ix-1,iz)||isCrack(ix,iz+1)||isCrack(ix,iz-1))?1.6:1;
+ add(rockC,ix,-1,iz,pal(Math.min(1,t*nearLava),ao*(0.9+hs(ix,iz,5)*0.2)));
+ add(rockC,ix,HT,iz,pal(0.15+vn(ix,iz,7,9)*0.3,0.55));
+}
+for(let side=0;side<4;side++)for(let u=0;u<N;u++)for(let h=0;h<HT;h++){
+ const fall=side===0&&inFall(u);const d=fall?1:wdepth(side,u,h);
+ for(let k=0;k<d+1;k++){let x,z;const off=k-1;
+  if(side===0){x=u;z=off;}else if(side===1){x=u;z=N-1-off;}else if(side===2){x=off;z=u;}else{x=N-1-off;z=u;}
+  if(fall&&k===1){lava.push([x,h,z,1,u*0.7,h]);continue;}
+  const strata=vn(h,u*0.15,3,side+11);const t=0.15+strata*0.55+(hs(u,h,side)-0.5)*0.1;const ao=h<3?0.6+h*0.13:1;
+  add(rockS,x,h,z,pal(Math.min(1,t),ao*(0.85+hs(x,h+side,z)*0.25)));}
+}
+cols.forEach((c,ci)=>{for(let h=0;h<HT;h++){const bulge=(h<4||h>HT-4)?1.4:0;const r=c[2]+bulge+vn(h,ci,4,21)*0.8;
+ for(let x=Math.floor(c[0]-r-1);x<=c[0]+r+1;x++)for(let z=Math.floor(c[1]-r-1);z<=c[1]+r+1;z++){const d=Math.hypot(x-c[0],z-c[1]);
+  if(d<=r&&d>r-1.6){const t=0.2+vn(h,Math.atan2(z-c[1],x-c[0])*6,3,ci+40)*0.55;add(rockS,x,h,z,pal(t,0.9+hs(x,h,z)*0.2));}}}});
+for(let i=0;i<70;i++){const sx=3+Math.floor(hs(i,1,77)*84),sz=3+Math.floor(hs(i,2,77)*84);const L=3+Math.floor(hs(i,3,77)*9),R=1+hs(i,4,77)*1.6;
+ for(let j=1;j<=L;j++){const r=R*(1-j/(L+1));for(let x=-2;x<=2;x++)for(let z=-2;z<=2;z++){if(Math.hypot(x,z)<=r+0.3)add(rockS,sx+x,HT-j,sz+z,pal(0.2+j/L*0.35,0.9));}}}
+const bc=[45,45];
+for(let x=-1;x<=1;x++)for(let z=-1;z<=1;z++)for(let h=0;h<3;h++)add(rockS,bc[0]+x,h,bc[1]+z,[0.14,0.07,0.08]);
+for(let x=-3;x<=3;x++)for(let z=-3;z<=3;z++){const d=Math.max(Math.abs(x),Math.abs(z));
+ if(d===3){add(rockS,bc[0]+x,3,bc[1]+z,[0.2,0.09,0.08]);add(rockS,bc[0]+x,4,bc[1]+z,[0.24,0.11,0.08]);}if(d<3)lava.push([bc[0]+x,3,bc[1]+z,2,x+z,0]);}
+// Stepped (toon) lighting: 4 bands
+const gmap=new THREE.DataTexture(new Uint8Array([45,110,185,255]),4,1,THREE.LuminanceFormat);gmap.minFilter=gmap.magFilter=THREE.NearestFilter;gmap.needsUpdate=true;
+const toonMat=new THREE.MeshToonMaterial({gradientMap:gmap});const stdMat=new THREE.MeshStandardMaterial({roughness:0.95});
+const geo=new THREE.BoxGeometry(vs,vs,vs);const o=new THREE.Object3D(),c=new THREE.Color();const meshes=[];
+function build(list,mat,parent,cast,g){const m=new THREE.InstancedMesh(g||geo,mat,list.length);
+ list.forEach((v,i)=>{o.position.set((v[0]+0.5)*vs,(v[1]+0.5)*vs,(v[2]+0.5)*vs);o.scale.set(1,1,1);o.updateMatrix();m.setMatrixAt(i,o.matrix);c.setRGB(v[3],v[4],v[5]);m.setColorAt(i,c);});
+ m.castShadow=!!cast;m.receiveShadow=true;(parent||scene).add(m);return m;}
+meshes.push(build(rockC,toonMat,null,false));meshes.push(build(rockS,toonMat,null,true));
+const lmat=new THREE.MeshBasicMaterial();const lavaMesh=build(lava,lmat,null,false);lavaMesh.receiveShadow=false;
+// Skeleton enemy
+const skel=new THREE.Group();const bones=[],eyes=[];
+const bone=(x,y,z)=>{const v=0.85+hs(x+20,y+20,z+20)*0.2;bones.push([x,y,z,0.86*v,0.78*v,0.62*v]);};
+for(let y=0;y<6;y++){bone(-1,y,0);bone(1,y,0);}for(let x=-1;x<=1;x++)bone(x,6,0);for(let y=7;y<12;y++)bone(0,y,0);
+for(let y=8;y<=10;y++){if(y===9)continue;for(let x=-2;x<=2;x++){bone(x,y,1);if(Math.abs(x)===2){bone(x,y,0);bone(x,y,-1);}}}
+for(let x=-3;x<=3;x++)bone(x,11,0);for(let y=7;y<11;y++){bone(-3,y,0);bone(3,y,0);}
+for(let x=-1;x<=1;x++)for(let y=12;y<16;y++)for(let z=-1;z<=1;z++){if(z===1&&y===14&&x!==0)continue;if(z===1&&y===12&&x===0)continue;bone(x,y,z);}
+for(let y=7;y<18;y++)bones.push([4,y,1,0.62,0.6,0.66]);[[3,6],[5,6],[4,6],[4,5]].forEach(p=>bones.push([p[0],p[1],1,0.38,0.16,0.08]));
+eyes.push([-1,14,1,1,0.3,0.05],[1,14,1,1,0.3,0.05]);
+const skelMesh=build(bones,toonMat,skel,true);
+// Outline via inverted hull (real game: post-process outline)
+const outline=build(bones,new THREE.MeshBasicMaterial({color:0x0c0203,side:THREE.BackSide}),skel,false,new THREE.BoxGeometry(vs*1.35,vs*1.35,vs*1.35));outline.receiveShadow=false;
+const eyeMesh=build(eyes,lmat,skel,false);
+skel.position.set(5.6,0,5.2);skel.rotation.y=-0.35;scene.add(skel);
+// Glow sprites (real game: bloom post-process)
+const cv=document.createElement('canvas');cv.width=cv.height=64;const cx=cv.getContext('2d');const gr=cx.createRadialGradient(32,32,0,32,32,32);
+gr.addColorStop(0,'rgba(255,255,255,1)');gr.addColorStop(0.3,'rgba(255,255,255,0.45)');gr.addColorStop(1,'rgba(255,255,255,0)');cx.fillStyle=gr;cx.fillRect(0,0,64,64);
+const gtex=new THREE.CanvasTexture(cv);const glows=[];
+function glow(x,y,z,s,col,parent){const m=new THREE.Sprite(new THREE.SpriteMaterial({map:gtex,color:col,blending:THREE.AdditiveBlending,depthWrite:false,transparent:true,fog:false}));m.position.set(x,y,z);m.scale.set(s,s,1);(parent||scene).add(m);glows.push(m);return m;}
+const bx=(bc[0]+0.5)*vs,bz=(bc[1]+0.5)*vs;
+const gB=glow(bx,0.75,bz,2.4,0xff7a20);const gF=falls.map(f=>glow(((f[0]+f[1])/2+0.5)*vs,1.3,0.35,3.6,0xff5a10));
+const gE=[glow(-0.5*vs,14.5*vs,1.6*vs,0.35,0xff3010,skel),glow(1.5*vs,14.5*vs,1.6*vs,0.35,0xff3010,skel)];
+// Lights: purple sky / maroon ground hemisphere gives hue-shifted shadows
+const hemi=new THREE.HemisphereLight(0x5a2a70,0x501008,0.55);scene.add(hemi);
+const bl=new THREE.PointLight(0xff8030,2.6,10,1.5);bl.position.set(bx,0.9,bz);bl.castShadow=true;bl.shadow.mapSize.set(512,512);bl.shadow.bias=-0.004;bl.shadow.camera.far=12;scene.add(bl);
+const fl=falls.map(f=>{const l=new THREE.PointLight(0xff5a10,2.2,7,1.5);l.position.set(((f[0]+f[1])/2+0.5)*vs,1.2,0.6);scene.add(l);return l;});
+const eyeLight=new THREE.PointLight(0xff3010,0.7,1.8,2);eyeLight.position.set(0,14.5*vs,2*vs);skel.add(eyeLight);
+const hand=new THREE.PointLight(0xffb070,0.3,3,2);scene.add(hand);
+// Particles: fire + floating embers
+const PF=60,PA=90,PN=PF+PA;const pmesh=new THREE.InstancedMesh(geo,new THREE.MeshBasicMaterial({fog:false}),PN);scene.add(pmesh);
+const parts=[];for(let i=0;i<PN;i++)parts.push({fire:i<PF,life:Math.random(),x:0,y:0,z:0,ox:0,oz:0,vy:0,ph:Math.random()*6});
+function respawn(p){if(p.fire){p.ox=(Math.random()-0.5)*0.45;p.oz=(Math.random()-0.5)*0.45;p.y=4.5*vs;p.vy=0.3+Math.random()*0.35;}else{p.x=0.5+Math.random()*8;p.z=0.5+Math.random()*8;p.y=Math.random()*0.3;p.vy=0.08+Math.random()*0.12;}p.life=0;}
+parts.forEach(p=>{respawn(p);p.life=Math.random();if(!p.fire)p.y=Math.random()*2.4;});
+let yaw=-0.05,pitch=-0.05,drag=false,lx=0,ly=0,lastDrag=-10;
+el.addEventListener('pointerdown',e=>{drag=true;lx=e.clientX;ly=e.clientY;wrap.style.cursor='grabbing';el.setPointerCapture(e.pointerId);});
+el.addEventListener('pointermove',e=>{if(!drag)return;yaw-=(e.clientX-lx)*0.005;pitch=Math.max(-1.1,Math.min(1.1,pitch-(e.clientY-ly)*0.005));lx=e.clientX;ly=e.clientY;lastDrag=performance.now()/1000;});
+const up=()=>{drag=false;wrap.style.cursor='grab';};el.addEventListener('pointerup',up);el.addEventListener('pointercancel',up);
+const cPix=document.getElementById('cPix'),cSty=document.getElementById('cSty');
+cPix.onchange=()=>{renderer.setPixelRatio(cPix.checked?PIX():full);renderer.setSize(W(),H());fit();};
+cSty.onchange=()=>{const s=cSty.checked;const m=s?toonMat:stdMat;meshes.forEach(x=>x.material=m);skelMesh.material=m;outline.visible=s;glows.forEach(g=>g.visible=s);
+ hemi.color.set(s?0x5a2a70:0x888888);hemi.groundColor.set(s?0x501008:0x444444);scene.fog=s?fog:new THREE.FogExp2(0x101010,0.08);scene.background.set(s?0x140504:0x101010);
+ bl.color.set(s?0xff8030:0xffd8b0);fl.forEach(l=>l.color.set(s?0xff5a10:0xffd0a0));};
+window.addEventListener('resize',()=>{renderer.setSize(W(),H());camera.aspect=W()/H();camera.updateProjectionMatrix();fit();});
+let prev=performance.now()/1000;
+function loop(){const t=performance.now()/1000,dt=Math.min(0.05,t-prev);prev=t;
+ const sway=(t-lastDrag>2.5)?Math.sin(t*0.35)*0.2:0;
+ camera.position.set(4.5+Math.sin(t*0.5)*0.03,1.05+Math.sin(t*1.6)*0.012,8.2);camera.rotation.y=yaw+sway;camera.rotation.x=pitch;
+ hand.position.set(camera.position.x+0.25,camera.position.y-0.2,camera.position.z-0.3);
+ const f=(a,b)=>0.82+0.11*Math.sin(t*a)+0.07*Math.sin(t*b+1.3);
+ bl.intensity=2.6*f(9.1,23.7);fl[0].intensity=2.2*f(3.1,7.7);fl[1].intensity=2.2*f(2.7,8.3);
+ gB.scale.setScalar(2.4*f(9.1,23.7));gF.forEach((g,i)=>g.scale.setScalar(3.6*f(3+i,7+i)));
+ lava.forEach((v,i)=>{let k;if(v[3]===1)k=0.5+0.5*Math.sin(v[5]*0.55+t*5+v[4]);else if(v[3]===2)k=0.5+0.5*Math.sin(t*6+v[4]);else k=0.5+0.5*Math.sin(t*1.5+v[4]);
+  c.setRGB(1,0.35+k*0.55,0.05+k*k*0.45);lavaMesh.setColorAt(i,c);});lavaMesh.instanceColor.needsUpdate=true;
+ skel.position.y=Math.sin(t*1.8)*0.02;skel.rotation.y=-0.35+Math.sin(t*0.9)*0.08;
+ const ep=0.75+0.25*Math.sin(t*3);c.setRGB(1,0.3*ep,0.05);eyeMesh.setColorAt(0,c);eyeMesh.setColorAt(1,c);eyeMesh.instanceColor.needsUpdate=true;eyeLight.intensity=0.7*ep;gE.forEach(g=>g.scale.setScalar(0.35*ep+0.1));
+ parts.forEach((p,i)=>{p.life+=dt*(p.fire?1.3:0.12);if(p.life>=1||p.y>2.5)respawn(p);p.y+=p.vy*dt;let s;
+  if(p.fire){const sh=1-p.life*0.7;p.x=bx+p.ox*sh;p.z=bz+p.oz*sh;s=(1-p.life)*1.2+0.15;c.setRGB(1,Math.max(0.15,0.95-p.life*0.85),Math.max(0,0.4-p.life*0.6));}
+  else{p.x+=Math.sin(t*0.7+p.ph)*0.002;s=0.32;const tw=0.6+0.4*Math.sin(t*4+p.ph);c.setRGB(tw,0.72*tw,0.25*tw);}
+  o.position.set(p.x,p.y,p.z);o.scale.set(s,s,s);o.updateMatrix();pmesh.setMatrixAt(i,o.matrix);pmesh.setColorAt(i,c);});
+ pmesh.instanceMatrix.needsUpdate=true;pmesh.instanceColor.needsUpdate=true;
+ renderer.render(scene,camera);requestAnimationFrame(loop);}
+loop();
+})();
+</script>
+</body>
+</html>
