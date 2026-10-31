@@ -40,6 +40,8 @@ interface Rig {
   readonly tilt: THREE.Group;
   readonly arm: THREE.Group;
   readonly material: THREE.MeshToonMaterial;
+  /** Resting glow (elites); hit flashes add to it. */
+  readonly glow: THREE.Color;
   readonly height: number;
   readonly phase: number;
   yaw: number;
@@ -89,12 +91,13 @@ export class UnitsView {
   readonly units = new Map<string, UnitVisual>();
   constructor(private readonly fx: Particles) {}
 
-  private buildRig(type: string, ally: boolean, seq: number): Rig {
+  private buildRig(type: string, ally: boolean, elite: boolean, seq: number): Rig {
     const modelId = ally ? getSummon(type).model : getEnemy(type).model;
     const model = MODELS[modelId] ?? (MODELS.warrior as (typeof MODELS)[string]);
     const geo = modelGeometry(model);
-    // Allies are a shade greener and darker: same bones, different master.
-    const material = toonMaterial({ emissive: 0x000000, ...(ally ? { color: 0xb8e0c0 } : {}) });
+    // Allies are a shade greener: same bones, different master. Elites are tinted and glow red.
+    const tint = ally ? { color: 0xb8e0c0 } : elite ? { color: 0xffb0a0 } : {};
+    const material = toonMaterial({ emissive: elite ? 0x3a0400 : 0x000000, ...tint });
     const line = ally ? allyOutlineMaterial : outlineMaterial;
     const root = new THREE.Group();
     const tilt = new THREE.Group();
@@ -112,6 +115,7 @@ export class UnitsView {
       tilt,
       arm,
       material,
+      glow: material.emissive.clone(),
       height: modelHeight(model),
       phase: seq * 1.7,
       yaw: 0,
@@ -134,7 +138,15 @@ export class UnitsView {
       isPlayer: boolean,
       ally: boolean,
       type: string,
-      u: { x: number; y: number; dir: Dir; hp: number; maxHp: number; statuses: readonly { id: string }[] },
+      u: {
+        x: number;
+        y: number;
+        dir: Dir;
+        hp: number;
+        maxHp: number;
+        statuses: readonly { id: string }[];
+        elite?: boolean;
+      },
       intent: Intent | null,
     ) => {
       seen.add(id);
@@ -175,7 +187,7 @@ export class UnitsView {
       v.lunge = null;
       v.dying = null;
       if (!isPlayer && v.alive && !v.rig) {
-        v.rig = this.buildRig(type, ally, this.units.size);
+        v.rig = this.buildRig(type, ally, 'elite' in u && u.elite === true, this.units.size);
         v.rig.yaw = yawFor(u.dir);
       }
       if (v.rig && !v.alive) this.dropRig(v);
@@ -196,17 +208,17 @@ export class UnitsView {
   }
 
   /** A summon appears mid-playback and climbs out of the ground. */
-  spawn(id: string, type: string, at: Vec2, dir: Dir, hp: number, now: number): void {
+  spawn(id: string, type: string, ally: boolean, at: Vec2, dir: Dir, hp: number, now: number): void {
     if (this.units.has(id)) return;
     const v: UnitVisual = {
       id,
       isPlayer: false,
-      ally: true,
+      ally,
       type,
       cell: { x: at.x, y: at.y },
       dir,
       hp,
-      maxHp: getSummon(type).maxHp,
+      maxHp: ally ? getSummon(type).maxHp : getEnemy(type).maxHp,
       intent: null,
       alive: true,
       pos: cellCenter(at),
@@ -217,7 +229,7 @@ export class UnitsView {
       strikeStart: -1e9,
       spawnStart: now,
       statuses: [],
-      rig: this.buildRig(type, true, this.units.size),
+      rig: this.buildRig(type, ally, false, this.units.size),
     };
     if (v.rig) v.rig.yaw = yawFor(dir);
     this.units.set(id, v);
@@ -327,7 +339,7 @@ export class UnitsView {
       // Hit: white flash and a recoil.
       const f = (now - v.flashStart) / FLASH_MS;
       const hit = f >= 0 && f < 1 ? 1 - f : 0;
-      r.material.emissive.setScalar(hit * 0.9);
+      r.material.emissive.copy(r.glow).addScalar(hit * 0.9);
       r.tilt.rotation.x = -0.3 * hit + Math.sin(s * 0.9 + r.phase) * 0.02;
 
       if (v.dying) {

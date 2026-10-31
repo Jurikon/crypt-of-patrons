@@ -16,6 +16,7 @@ export interface OverlayActions {
   setClass(classId: string): void;
   grantAbility(abilityId: string, slot: number): void;
   toggleModifier(modifierId: string): void;
+  resetSave(): void;
 }
 
 /** Debug overlay toggled with the backquote key. */
@@ -62,7 +63,10 @@ export function DebugOverlay({ view, actions }: { view: ViewState; actions: Over
       </div>
       <div class="debug-buttons">
         <button type="button" onClick={() => actions.cheat('killAll')} data-testid="kill-all">
-          {t('debug.killAll')}
+          {t('debug.skipRoom')}
+        </button>
+        <button type="button" onClick={() => actions.cheat('toBoss')} data-testid="to-boss">
+          {t('debug.toBoss')}
         </button>
         <button type="button" onClick={() => actions.cheat('heal')}>
           {t('debug.heal')}
@@ -74,6 +78,11 @@ export function DebugOverlay({ view, actions }: { view: ViewState; actions: Over
         </button>
         <button type="button" onClick={() => actions.cheat('toggleGod')} data-testid="god">
           {t('debug.god')}: {p?.god ? t('debug.on') : t('debug.off')}
+        </button>
+      </div>
+      <div class="debug-buttons">
+        <button type="button" onClick={actions.resetSave} data-testid="reset-save">
+          {t('debug.resetSave')}
         </button>
       </div>
 

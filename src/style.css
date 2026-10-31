@@ -755,3 +755,249 @@ kbd {
   border-radius: 50%;
   box-shadow: 0 0 3px #000;
 }
+
+/* ---- M3: run screens --------------------------------------------------------------------------- */
+
+.start,
+.reward {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+  background: radial-gradient(ellipse at center, rgba(20, 6, 4, 0.82), rgba(8, 2, 2, 0.96));
+  pointer-events: auto;
+  overflow-y: auto;
+}
+
+.start-title {
+  font-size: 40px;
+  color: var(--accent);
+  letter-spacing: 0.06em;
+  text-shadow: 0 0 18px rgba(255, 140, 40, 0.5);
+}
+
+.start-sub,
+.reward-title {
+  font-size: 16px;
+  color: var(--ink);
+}
+
+.start-error {
+  color: #ff9a7a;
+  font-size: 13px;
+}
+
+.start-continue {
+  font: inherit;
+  font-size: 16px;
+  padding: 10px 26px;
+  color: #1a0c06;
+  background: var(--accent);
+  border: none;
+  cursor: pointer;
+}
+
+.start-classes,
+.reward-cards {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 14px;
+  max-width: 980px;
+}
+
+.class-card,
+.reward-card {
+  width: 290px;
+  text-align: left;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink);
+  background: rgba(30, 18, 12, 0.92);
+  border: 2px solid var(--border);
+  padding: 14px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.class-card:hover,
+.reward-card:hover {
+  border-color: var(--accent);
+  background: rgba(50, 28, 16, 0.95);
+}
+
+.class-name,
+.reward-name {
+  font-size: 18px;
+  color: var(--accent);
+}
+
+.class-hp,
+.reward-kind {
+  color: var(--ink-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.class-passive {
+  color: #cfe8ff;
+}
+
+.reward-modifier .reward-name {
+  color: #9fd8ff;
+}
+
+.reward-upgrade .reward-name {
+  color: #9effa8;
+}
+
+.reward-desc {
+  color: var(--ink);
+  line-height: 1.4;
+}
+
+.reward-skip {
+  font: inherit;
+  color: var(--ink-dim);
+  background: none;
+  border: 1px solid var(--border);
+  padding: 6px 16px;
+  cursor: pointer;
+}
+
+.run-progress {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 12px;
+}
+
+.run-pip {
+  width: 14px;
+  height: 14px;
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+  border: 1px solid var(--border);
+  background: #1a100a;
+  color: var(--ink);
+}
+
+.run-done {
+  background: #6a4a22;
+}
+
+.run-here {
+  background: var(--accent);
+  color: #1a0c06;
+  box-shadow: 0 0 6px var(--accent);
+}
+
+.run-kind-elite.run-done,
+.run-kind-elite.run-here {
+  background: #a83224;
+}
+
+.run-label {
+  margin-left: 6px;
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+.turn-banner {
+  display: flex;
+  align-items: center;
+}
+
+.door-tag {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  padding: 3px 9px;
+  font-size: 13px;
+  white-space: nowrap;
+  color: #1a0c06;
+  border: 1px solid rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 10px currentColor;
+}
+
+.door-icon {
+  margin-right: 5px;
+}
+
+.door-ability {
+  background: #ffd060;
+}
+.door-modifier {
+  background: #80d0ff;
+}
+.door-upgrade {
+  background: #8aff9a;
+}
+.door-rest {
+  background: #ffb0c8;
+}
+.door-elite {
+  background: #ff6a5a;
+}
+.door-boss {
+  background: #c090ff;
+}
+
+.result-stats {
+  margin: 8px auto;
+  border-collapse: collapse;
+}
+
+.result-stats th {
+  text-align: left;
+  font-weight: normal;
+  color: var(--ink-dim);
+  padding: 2px 16px 2px 0;
+}
+
+.result-build {
+  max-width: 520px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 8px;
+}
+
+.result-build-title {
+  color: var(--accent);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.result-mods {
+  color: #9fd8ff;
+}
+
+.result-ups {
+  color: #9effa8;
+}
+
+.room-fade {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  animation: room-fade 0.6s ease-out forwards;
+  pointer-events: none;
+}
+
+@keyframes room-fade {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}

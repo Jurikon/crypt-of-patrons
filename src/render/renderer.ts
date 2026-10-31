@@ -14,6 +14,8 @@ import { CELL, WALL_H } from './dims';
 import { Particles } from './fx';
 import { Highlights, type Highlight } from './highlights';
 import { SurfacesView } from './surfacesView';
+import { DoorsView } from './doorsView';
+import type { RewardKind } from '../content';
 import { UnitsView, type UnitVisual } from './unitsView';
 import { buildCave } from './voxel/cave';
 
@@ -99,8 +101,15 @@ export interface CellLabel {
   readonly kind: 'intent' | 'preview' | 'death';
 }
 
+/** An open door's reward label, pinned above its arch. */
+export interface DoorLabel {
+  readonly at: ScreenPoint;
+  readonly reward: RewardKind;
+}
+
 /** Everything the HTML overlay needs to draw this frame. */
 export interface FrameLabels {
+  readonly doors: readonly DoorLabel[];
   readonly width: number;
   readonly height: number;
   readonly units: readonly LabelUnit[];
@@ -145,7 +154,8 @@ export class GameRenderer {
   private roomLights: { light: THREE.PointLight; base: number; a: number; b: number }[] = [];
   private rig: CameraRig | null = null;
   private currentRoom: Room | null = null;
-  private seed = -1;
+  /** Which room the scene shows (seed + room number): a new one rebuilds the cave. */
+  private roomKey = '';
   private playerIds = new Set<string>();
   private quality: Quality = 'high';
 
@@ -157,6 +167,7 @@ export class GameRenderer {
   private needsSync = false;
   private preview: { preview: Preview; target: Vec2; options: readonly Vec2[] } | null = null;
   private readonly surfacesView = new SurfacesView();
+  private readonly doorsView = new DoorsView();
   private blasts: { cells: readonly Vec2[]; start: number }[] = [];
   private strikes: { cells: readonly Vec2[]; start: number }[] = [];
   private floaters: FloatingNumber[] = [];
@@ -187,6 +198,7 @@ export class GameRenderer {
       this.camera,
       this.unitsView.group,
       this.surfacesView.group,
+      this.doorsView.group,
       this.highlights.group,
       this.fx.group,
     );
@@ -228,7 +240,8 @@ export class GameRenderer {
     for (const l of this.roomLights) this.scene.remove(l.light);
     this.roomLights = [];
 
-    const caveSeed = nextU32(fork(createRng(state.seed), 'cave'));
+    const depth = state.run?.depth ?? 1;
+    const caveSeed = nextU32(fork(createRng(state.seed), depth === 1 ? 'cave' : `cave:${depth}`));
     const cave = buildCave(state.room.grid, caveSeed);
     this.room = buildCaveMeshes(cave);
     this.scene.add(this.room.group);
@@ -264,8 +277,9 @@ export class GameRenderer {
   reset(state: GameState, now: number): void {
     const player = state.players[0];
     if (!player) return;
-    if (state.seed !== this.seed) {
-      this.seed = state.seed;
+    const key = `${state.seed}:${state.run?.depth ?? 0}`;
+    if (key !== this.roomKey) {
+      this.roomKey = key;
       this.buildRoom(state);
       this.currentRoom = state.room;
       this.unitsView.clear();
@@ -281,6 +295,7 @@ export class GameRenderer {
     this.floaters = [];
     this.unitsView.sync(state);
     this.surfacesView.sync(state);
+    this.doorsView.sync(state);
     if (this.rig) this.rig.snap(state.room, player, now);
     else this.rig = new CameraRig(this.camera, state.room, player, now);
   }
@@ -372,6 +387,7 @@ export class GameRenderer {
           this.enemyPhase = false;
           this.unitsView.sync(this.target_);
           this.surfacesView.sync(this.target_);
+          this.doorsView.sync(this.target_);
         }
         return;
       }
@@ -492,7 +508,7 @@ export class GameRenderer {
         this.fx.splash(cellCenter(e.center).setY(0.8), now, 50);
         return EVENT_MS.area ?? 0;
       case 'summoned':
-        v.spawn(e.unitId, e.summon, e.at, e.dir, e.hp, now);
+        v.spawn(e.unitId, e.summon, e.side === 'heroes', e.at, e.dir, e.hp, now);
         this.surfacesView.remove('corpse', e.at);
         return EVENT_MS.summoned ?? 0;
       case 'statusApplied':
@@ -505,6 +521,10 @@ export class GameRenderer {
             'info',
             now,
           );
+        return 0;
+      case 'doorsOpened':
+      case 'rewardTaken':
+        if (this.target_) this.doorsView.sync(this.target_);
         return 0;
       case 'surfaceAdded':
         this.surfacesView.add(e.surface, e.at);
@@ -560,9 +580,19 @@ export class GameRenderer {
       for (const e of vs.enemies as Enemy[]) {
         if (!e.intent) continue;
         const { cells, hit } = intentCells(vs, e, e.intent);
+        if (e.intent.kind === 'summon') {
+          // Where new enemies will rise next turn.
+          for (const c of cells) {
+            list.push({ cell: c, kind: 'summon' });
+            cellLabels.push({ cell: c, text: '☠', kind: 'intent' });
+          }
+          continue;
+        }
         for (const c of cells) list.push({ cell: c, kind: 'intent' });
         const impact = hit ? { x: hit.x, y: hit.y } : cells[cells.length - 1];
-        if (impact) cellLabels.push({ cell: impact, text: String(e.intent.damage), kind: 'intent' });
+        if (e.intent.kind === 'sweep')
+          for (const c of cells) cellLabels.push({ cell: c, text: String(e.intent.damage), kind: 'intent' });
+        else if (impact) cellLabels.push({ cell: impact, text: String(e.intent.damage), kind: 'intent' });
       }
     }
     if (this.preview && !this.isBusy(now)) {
@@ -614,6 +644,7 @@ export class GameRenderer {
     for (const l of this.roomLights) l.light.intensity = l.base * flicker(s, l.a, l.b);
     this.room.lavaMaterial.uniforms.uTime!.value = s;
     this.fx.update(now);
+    this.doorsView.update(now);
 
     // Top view: clear the fog, lift the ambient light, drop the ceiling, show the player marker.
     this.fog.density = FOG_DENSITY * (1 - top);
@@ -709,7 +740,23 @@ export class GameRenderer {
         cells.push({ at: this.project(cellCenter(end).setY(1)), text: '☠', kind: 'death' });
       }
     }
-    return { width: this.cssW, height: this.cssH, units, floaters, cells, topView: top, enemyPhase: this.enemyPhase };
+    const doors: DoorLabel[] = [];
+    const run = this.target_?.run;
+    if (run?.phase === 'doors' && this.target_)
+      for (const o of run.doors) {
+        const d = this.target_.room.doors[o.door];
+        if (d) doors.push({ at: this.project(cellCenter(d).setY(2.15)), reward: o.reward });
+      }
+    return {
+      width: this.cssW,
+      height: this.cssH,
+      units,
+      floaters,
+      cells,
+      doors,
+      topView: top,
+      enemyPhase: this.enemyPhase,
+    };
   }
 
   /**
@@ -730,6 +777,7 @@ export class GameRenderer {
   dispose(): void {
     this.room?.dispose();
     this.surfacesView.dispose();
+    this.doorsView.dispose();
     this.highlights.dispose();
     this.unitsView.clear();
     this.fx.dispose();

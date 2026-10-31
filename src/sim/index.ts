@@ -23,3 +23,4 @@ export {
 export { cooldownOf, statOf } from './units';
 export { validTargets } from './targeting';
 export { generateRoom, ROOM_SHAPES, type Door, type Room, type RoomShape } from './gen/room';
+export { readSave, writeSave, SAVE_VERSION, type SaveFile } from './save';

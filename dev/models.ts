@@ -26,7 +26,8 @@ scene.add(fire);
 
 const outline = new THREE.MeshBasicMaterial({ color: 0x2a0a08, side: THREE.BackSide });
 const eyes = new THREE.MeshBasicMaterial({ color: new THREE.Color(3.2, 0.75, 0.12) });
-Object.values(MODELS).forEach((model, i) => {
+const all = Object.values(MODELS);
+all.forEach((model, i) => {
   const g = modelGeometry(model);
   const root = new THREE.Group();
   const mat = toonMaterial();
@@ -36,12 +37,12 @@ Object.values(MODELS).forEach((model, i) => {
   arm.rotation.x = model.poses[pose];
   arm.add(new THREE.Mesh(g.arm.mesh, mat), new THREE.Mesh(g.arm.outline, outline));
   root.add(arm);
-  root.position.set(i === 0 ? -0.75 : 0.75, 0, 0);
+  root.position.set((i - (all.length - 1) / 2) * 1.5, 0, 0);
   root.rotation.y = turn;
   scene.add(root);
 });
 
 const camera = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 0.05, 50);
-camera.position.set(0, 1.2, 4.6);
+camera.position.set(0, 1.3, 2.2 + all.length * 1.3);
 camera.lookAt(0, 0.9, 0);
 renderer.render(scene, camera);

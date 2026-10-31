@@ -24,6 +24,15 @@ export interface ViewState {
   readonly quality: Quality;
   /** Where the selected ability is aimed (null for abilities without a choice of target). */
   readonly aim: { readonly x: number; readonly y: number } | null;
+  /** Class choice (with "continue" when a saved run exists) or the game itself. */
+  readonly screen: 'start' | 'play';
+  readonly canContinue: boolean;
+  /** A save existed but could not be read. */
+  readonly saveError: boolean;
+  /** Real time played in this run. */
+  readonly elapsedMs: number;
+  /** When the last room change happened, for the fade. */
+  readonly roomAt: number;
 }
 
 export interface Store<T> {

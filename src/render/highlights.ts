@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { Vec2 } from '../core/grid';
 import { CELL } from './dims';
 
-export type HighlightKind = 'intent' | 'target' | 'push' | 'strike' | 'option' | 'blast' | 'dest';
+export type HighlightKind = 'intent' | 'target' | 'push' | 'strike' | 'option' | 'blast' | 'dest' | 'summon';
 
 /**
  * Cold colours on purpose: the world is orange and red (lava, fire), so danger is shown as a pale
@@ -20,6 +20,8 @@ const STYLE: Record<
   option: { color: 0x6aa8ff, frame: 0.45, fill: 0.05, inset: 0.12, y: 0.015, pulse: false },
   /** Explosion cells (preview, then a flash when it goes off). */
   blast: { color: 0xfff0d0, frame: 0.7, fill: 0.35, inset: 0.04, y: 0.045, pulse: false },
+  /** Where an enemy will call up more enemies. */
+  summon: { color: 0xc080ff, frame: 0.9, fill: 0.2, inset: 0.1, y: 0.025, pulse: true },
   /** Where the player would land (teleport, dash, switch). */
   dest: { color: 0xd0a8ff, frame: 0.95, fill: 0.18, inset: 0.08, y: 0.05, pulse: true },
 };

@@ -1,3 +1,4 @@
+import type { RewardKind } from '../content';
 import { t, type TextKey } from '../i18n';
 import type { Intent } from '../sim';
 import type { LabelUnit } from '../render/renderer';
@@ -5,8 +6,26 @@ import { useStore, type LabelsStore } from './store';
 
 const EDGE = 44;
 
+const DOOR_ICONS: Record<RewardKind, string> = {
+  ability: '✧',
+  modifier: '✦',
+  upgrade: '▲',
+  rest: '♥',
+  elite: '☠',
+  boss: '♛',
+};
+
 function intentIcon(intent: Intent): string {
-  return intent.kind === 'melee' ? '⚔' : '➶';
+  switch (intent.kind) {
+    case 'melee':
+      return '⚔';
+    case 'line':
+      return '➶';
+    case 'sweep':
+      return '⚔⚔⚔';
+    case 'summon':
+      return '☠+';
+  }
 }
 
 /** HTML labels pinned to the 3D world: health and intents over enemies, edge arrows, floating numbers. */
@@ -23,6 +42,19 @@ export function WorldOverlay({ store }: { store: LabelsStore }) {
         labels.units.map((u) =>
           u.head.onScreen || u.ally ? null : <EdgeArrow key={u.id} u={u} w={width} h={height} />,
         )}
+      {labels.doors.map((d, i) =>
+        d.at.onScreen ? (
+          <div
+            key={`door${i}`}
+            class={`door-tag door-${d.reward}`}
+            style={{ left: `${d.at.x}px`, top: `${d.at.y}px` }}
+            data-testid="door-tag"
+          >
+            <span class="door-icon">{DOOR_ICONS[d.reward]}</span>
+            {t(`door.${d.reward}` as TextKey)}
+          </div>
+        ) : null,
+      )}
       {labels.cells.map((c, i) =>
         c.at.onScreen ? (
           <div key={i} class={`cell-label cell-${c.kind}`} style={{ left: `${c.at.x}px`, top: `${c.at.y}px` }}>
@@ -63,7 +95,7 @@ function UnitTag({ u, fade }: { u: LabelUnit; fade: number }) {
       {u.intent && (
         <div class="intent-badge">
           <span class="intent-icon">{intentIcon(u.intent)}</span>
-          <span class="intent-dmg">{u.intent.damage}</span>
+          {u.intent.damage > 0 && <span class="intent-dmg">{u.intent.damage}</span>}
         </div>
       )}
       <div class={u.ally ? 'unit-hp ally' : 'unit-hp'}>

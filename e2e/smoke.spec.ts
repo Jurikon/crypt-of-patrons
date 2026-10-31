@@ -45,3 +45,21 @@ test('the game loads without console errors and responds to input', async ({ pag
 
   expect(errors).toEqual([]);
 });
+
+test('a run starts from the class choice and can be continued after a reload', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (err) => errors.push(err.message));
+  await page.goto('/');
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  await expect(page.getByTestId('start-screen')).toBeVisible();
+  await page.getByTestId('start-rogue').click();
+  await expect(page.getByTestId('run-progress')).toBeVisible();
+  // One step, so there is something to continue.
+  await page.keyboard.press('KeyW');
+  await page.goto('/');
+  await expect(page.getByTestId('continue')).toBeVisible();
+  await page.getByTestId('continue').click();
+  await expect(page.getByTestId('run-progress')).toBeVisible();
+  expect(errors).toEqual([]);
+});

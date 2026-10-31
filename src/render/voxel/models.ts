@@ -348,9 +348,57 @@ function archer(): VoxelModel {
   };
 }
 
+/** The crypt warden (act 1 boss): a bigger skeleton king with a crown, a cape and a huge sword. */
+function warden(): VoxelModel {
+  const { body, eyes } = skeleton(-1);
+  // Crown with spikes.
+  for (let a = 0; a < 48; a++) {
+    const t = (a / 48) * Math.PI * 2;
+    const x = Math.round(Math.sin(t) * 5.2);
+    const z = Math.round(Math.cos(t) * 5.2);
+    body.set(x, 45, z, BRASS);
+    if (a % 6 === 0) body.box(x, x, 46, 47, z, z, BRASS);
+  }
+  // Heavy pauldrons on both shoulders, a tattered royal cape.
+  for (const sx of [-1, 1]) {
+    body.ellipsoid(sx * 7.5, 32.5, 0.5, 3.2, 2.6, 3.6, IRON, 0.45);
+    body.box(sx * 9, sx * 9, 34, 36, 0, 0, RUST);
+  }
+  for (let y = 8; y <= 33; y++) {
+    const half = 6 + Math.floor((33 - y) / 5);
+    for (let x = -half; x <= half; x++) {
+      if (y < 13 && hash3(x, y, 21) < 0.3 + (13 - y) * 0.12) continue;
+      body.set(x, y, -5, (x + y) % 6 === 0 ? CLOTH_DARK : CLOTH);
+    }
+  }
+  body.ellipsoid(0, 21.5, 0, 6.2, 1.2, 3.8, BRASS, 0.35);
+  // A huge greatsword.
+  const arm = new Shape();
+  armBones(arm, 1);
+  arm.box(0, -1, -19, -20, -5, 6, BRASS);
+  for (let y = -21; y >= -46; y--) {
+    const tip = y <= -43;
+    arm.box(0, -1, y, y, tip ? -1 : -2, tip ? 2 : 3, STEEL);
+    if (!tip) {
+      arm.box(0, -1, y, y, -2, -2, STEEL_EDGE);
+      arm.box(0, -1, y, y, 3, 3, STEEL_EDGE);
+      arm.box(0, -1, y, y, 0, 1, IRON);
+    }
+  }
+  return {
+    voxel: 0.05,
+    palette: PALETTE,
+    body: body.voxels(),
+    arm: { pivot: [7, 32, 0], voxels: arm.voxels() },
+    eyes,
+    poses: { idle: -0.7, windup: -2.9, strike: -0.4 },
+  };
+}
+
 export const MODELS: Readonly<Record<string, VoxelModel>> = {
   warrior: warrior(),
   archer: archer(),
+  warden: warden(),
 };
 
 /** Top of the model in world units, for placing labels. */

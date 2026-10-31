@@ -6,7 +6,17 @@ import { attachInput } from './input/input';
 import { GameRenderer, type Quality } from './render/renderer';
 import type { Vec2 } from './core/grid';
 import { CLASSES, getAbility } from './content';
-import { apply, createGame, preview, validTargets, type Command, type DebugAction, type GameState } from './sim';
+import {
+  apply,
+  createGame,
+  preview,
+  readSave,
+  validTargets,
+  writeSave,
+  type Command,
+  type DebugAction,
+  type GameState,
+} from './sim';
 import { App, ErrorScreen, type AppActions } from './ui/App';
 import { createStore, type LabelsStore, type ViewState } from './ui/store';
 
@@ -19,18 +29,39 @@ document.documentElement.lang = lang;
 const gameEl = document.getElementById('game') as HTMLElement;
 const uiEl = document.getElementById('ui') as HTMLElement;
 
-// Seed from the URL, or a fresh one written back so the link reproduces this room.
+// ---- saved run ----------------------------------------------------------------------------------
+
+const SAVE_KEY = 'cop.run';
+function loadSaveText(): string | null {
+  try {
+    return localStorage.getItem(SAVE_KEY);
+  } catch {
+    return null;
+  }
+}
+function storeSave(text: string | null): void {
+  try {
+    if (text === null) localStorage.removeItem(SAVE_KEY);
+    else localStorage.setItem(SAVE_KEY, text);
+  } catch {
+    // Storage blocked or full: the run just isn't saved.
+  }
+}
+const savedText = loadSaveText();
+let saved = readSave(savedText);
+
+// A seed in the URL starts that run directly (links, bug reports, tests); otherwise the start screen.
 const params = parseHash(location.hash);
-let seed = params.seed ?? randomSeed();
+let seed = params.seed ?? saved?.state.seed ?? randomSeed();
 const knownClass = (id: string | null | undefined) => (CLASSES.some((c) => c.id === id) ? (id as string) : 'knight');
-let classId = knownClass(params.classId);
+let classId = knownClass(params.classId ?? saved?.classId);
 const writeHash = () =>
   history.replaceState(null, '', formatHash({ seed, classId, debug: parseHash(location.hash).debug }));
-if (params.seed === null) writeHash();
 
 let state: GameState = createGame(seed, { classId });
-/** Every command since the room was created: seed + this list reproduces the session exactly. */
+/** Every command of the run: seed + class + this list reproduces it exactly. */
 let commands: Command[] = [];
+let elapsedMs = 0;
 let buffered: Command | null = null;
 let selected: string | null = null;
 /** Where the selected ability is aimed; `aimManual` once the wheel picked a target. */
@@ -81,7 +112,23 @@ const store = createStore<ViewState>({
   shownHp: null,
   quality,
   aim: null,
+  screen: params.seed !== null ? 'play' : 'start',
+  canContinue: saved !== null && !runOver(saved.state),
+  saveError: savedText !== null && saved === null,
+  elapsedMs: 0,
+  roomAt: -1e9,
 });
+if (params.seed !== null) writeHash();
+
+function runOver(s: GameState): boolean {
+  return s.run?.phase === 'won' || s.run?.phase === 'lost';
+}
+
+/** Writes the run after every command; a finished run leaves nothing to continue. */
+function persist(): void {
+  if (runOver(state)) storeSave(null);
+  else storeSave(writeSave({ state, commands, classId, elapsedMs }));
+}
 const labels: LabelsStore = createStore({ labels: null });
 
 const player = () => state.players[0];
@@ -157,17 +204,26 @@ function run(command: Command, now: number): void {
   }
   state = result.state;
   commands.push(command);
-  renderer.play(result.events, state);
+  if (result.events.some((e) => e.type === 'roomEntered')) {
+    // A new room: rebuild the scene at once behind a short fade.
+    selected = null;
+    renderer.reset(state, now);
+    store.set({ roomAt: now });
+  } else renderer.play(result.events, state);
+  persist();
+  if (state.run?.phase === 'reward' && document.pointerLockElement) document.exitPointerLock();
   if (command.type === 'useAbility') selected = null;
   // Keep showing the old health until the hit is actually animated.
   if (result.events.some((e) => e.type === 'phaseChanged')) store.set({ shownHp: before.players[0]?.hp ?? null });
-  if (state.combat.status !== 'active' && document.pointerLockElement) document.exitPointerLock();
+  if (runOver(state) && document.pointerLockElement) document.exitPointerLock();
   store.set({ game: state });
   refreshPreview();
 }
 
 /** Commands arriving mid-animation are buffered (one at a time; the latest wins). */
 function dispatch(command: Command): void {
+  // Nothing plays behind the start screen (it would overwrite the saved run).
+  if (store.get().screen !== 'play') return;
   const now = performance.now();
   if (renderer.isBusy(now)) buffered = command;
   else run(command, now);
@@ -177,6 +233,9 @@ function loadSeed(next: number): void {
   seed = next;
   state = createGame(seed, { classId });
   commands = [];
+  elapsedMs = 0;
+  store.set({ screen: 'play', elapsedMs: 0 });
+  persist();
   buffered = null;
   selected = null;
   aimManual = false;
@@ -198,7 +257,36 @@ function setClass(id: string): void {
   loadSeed(seed);
 }
 
+/** Starts a fresh run with a class (start screen). */
+function startRun(id: string): void {
+  classId = knownClass(id);
+  seed = randomSeed();
+  writeHash();
+  loadSeed(seed);
+}
+
+/** Picks up the saved run where it was left. */
+function continueRun(): void {
+  if (!saved) return;
+  state = saved.state;
+  commands = [...saved.commands];
+  classId = saved.classId;
+  seed = state.seed;
+  elapsedMs = saved.elapsedMs;
+  buffered = null;
+  selected = null;
+  writeHash();
+  renderer.reset(state, performance.now());
+  store.set({ game: state, screen: 'play', elapsedMs, notice: null });
+  refreshPreview();
+}
+
 function selectAbility(slot: number): void {
+  // On the reward screen the number keys pick a card.
+  if (state.run?.phase === 'reward') {
+    if (slot < state.run.offer.length) chooseReward(slot);
+    return;
+  }
   const id = player()?.abilities[slot];
   if (!id || state.combat.status !== 'active') return;
   if (selected === id) {
@@ -226,6 +314,18 @@ function cancel(): void {
   refreshPreview();
 }
 
+function chooseReward(index: number | null, replace?: number): void {
+  const p = player();
+  const option = index === null ? null : state.run?.offer[index];
+  // A new ability with every slot full has to say which one it replaces (the reward screen asks).
+  if (option?.kind === 'ability' && p && p.abilities.length > 4 && replace === undefined) return;
+  dispatch(
+    replace === undefined
+      ? { type: 'chooseReward', playerId: PLAYER_ID, index }
+      : { type: 'chooseReward', playerId: PLAYER_ID, index, replace },
+  );
+}
+
 const actions: AppActions = {
   newSeed,
   exportState: () => JSON.stringify({ seed, classId, commands }),
@@ -246,7 +346,19 @@ const actions: AppActions = {
   },
   selectAbility,
   retry: () => loadSeed(seed),
-  newRoom: newSeed,
+  newRun: () => {
+    storeSave(null);
+    saved = null;
+    store.set({ screen: 'start', canContinue: false, saveError: false });
+  },
+  startRun,
+  continueRun,
+  chooseReward,
+  resetSave: () => {
+    storeSave(null);
+    saved = null;
+    store.set({ canContinue: false });
+  },
 };
 
 attachInput(
@@ -293,7 +405,12 @@ render(h(App, { store, labels, actions }), uiEl);
 let frames = 0;
 let fpsWindowStart = performance.now();
 let wasBusy = false;
+let lastFrame = performance.now();
 function frame(now: number): void {
+  // Real time played: only while a run is on screen and going.
+  if (store.get().screen === 'play' && !runOver(state) && document.visibilityState === 'visible')
+    elapsedMs += Math.min(250, now - lastFrame);
+  lastFrame = now;
   if (buffered && !renderer.isBusy(now)) {
     const c = buffered;
     buffered = null;
@@ -308,7 +425,7 @@ function frame(now: number): void {
   }
   frames++;
   if (now - fpsWindowStart >= 500) {
-    store.set({ fps: (frames * 1000) / (now - fpsWindowStart) });
+    store.set({ fps: (frames * 1000) / (now - fpsWindowStart), elapsedMs });
     frames = 0;
     fpsWindowStart = now;
   }

@@ -1,4 +1,4 @@
-import { getAbility, getClass, getModifier, getPassive, getStatus } from '../content';
+import { ACT, getAbility, getClass, getModifier, getPassive, getStatus } from '../content';
 import { t, type TextKey } from '../i18n';
 import { cooldownOf, intentCells, type GameState } from '../sim';
 import { abilityName, describeAbility, describeRule } from './describe';
@@ -14,7 +14,7 @@ const NOTICE_MS = 1400;
 function incomingDamage(game: GameState, playerId: string): number {
   let total = 0;
   for (const e of game.enemies) {
-    if (e.intent && intentCells(game, e, e.intent).hit?.id === playerId) total += e.intent.damage;
+    if (e.intent && intentCells(game, e, e.intent).hits.some((u) => u.id === playerId)) total += e.intent.damage;
   }
   return total;
 }
@@ -40,6 +40,7 @@ export function Hud({ view, actions, now }: { view: ViewState; actions: HudActio
   return (
     <>
       <div class="turn-banner" data-testid="turn-banner">
+        {game.run && <RunProgress run={game.run} />}
         <span class="turn-number">{t('hud.turn', { n: game.combat.turn })}</span>
       </div>
 
@@ -143,5 +144,31 @@ export function Hud({ view, actions, now }: { view: ViewState; actions: HudActio
         </div>
       </div>
     </>
+  );
+}
+
+/** Act progress: the rooms behind you, the one you are in, and the boss at the end. */
+function RunProgress({ run }: { run: NonNullable<GameState['run']> }) {
+  const rooms = Array.from({ length: ACT.rooms + 1 }, (_, i) => i + 1);
+  const kindOf = (depth: number) => {
+    for (const e of run.log) if (e.type === 'room' && e.depth === depth) return e.kind;
+    return null;
+  };
+  return (
+    <div class="run-progress" data-testid="run-progress">
+      {rooms.map((d) => {
+        const boss = d === ACT.rooms + 1;
+        const kind = kindOf(d);
+        const state = d < run.depth ? 'done' : d === run.depth ? 'here' : 'ahead';
+        return (
+          <span key={d} class={`run-pip run-${state} ${kind ? `run-kind-${kind}` : ''}`}>
+            {boss ? '☠' : kind === 'rest' ? '♥' : kind === 'elite' ? '✦' : ''}
+          </span>
+        );
+      })}
+      <span class="run-label">
+        {run.depth > ACT.rooms ? t('run.boss') : t('run.room', { n: run.depth, total: ACT.rooms })}
+      </span>
+    </div>
   );
 }
