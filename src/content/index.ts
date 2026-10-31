@@ -118,7 +118,7 @@ export const ABILITIES: readonly AbilityDef[] = [
     id: 'rogue.shadowStep',
     nameKey: 'ability.rogue.shadowStep',
     tags: ['movement'],
-    cooldown: 3,
+    cooldown: 2,
     target: { kind: 'unit', range: 3, filter: 'foes', sight: false, freeBehind: true },
     // The target is dazed for a turn: it cannot turn round, so the next blow lands in its back.
     effects: [{ kind: 'teleportBehind' }, { kind: 'status', status: 'daze', turns: 1 }],

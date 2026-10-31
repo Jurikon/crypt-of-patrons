@@ -37,6 +37,21 @@ describe('saves', () => {
     expect(migrated.enemies.every((e) => e.elite === false && e.strikes === 0)).toBe(true);
   });
 
+  it('migrates a version-6 save (before second classes and items)', () => {
+    const v7 = createGame(4, { classId: 'rogue' });
+    const { initiation: _i, treasures: _t, ...run } = v7.run!;
+    const v6 = {
+      ...v7,
+      version: 6,
+      run,
+      players: v7.players.map(({ classes: _c, hybrid: _h, items: _it, ruleUses: _r, ...p }) => p),
+    };
+    const migrated = migrateState(JSON.parse(JSON.stringify(v6)))!;
+    expect(migrated.version).toBe(7);
+    expect(migrated.players[0]).toMatchObject({ classes: ['rogue'], hybrid: null, items: [], ruleUses: [] });
+    expect(migrated.run).toMatchObject({ initiation: false, treasures: 0 });
+  });
+
   it('broken, foreign or too-old saves are rejected without throwing', () => {
     expect(readSave(null)).toBeNull();
     expect(readSave('')).toBeNull();

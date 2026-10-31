@@ -229,7 +229,9 @@ function dispatch(command: Command): void {
   // Nothing plays behind the start screen (it would overwrite the saved run).
   if (store.get().screen !== 'play') return;
   const now = performance.now();
-  if (renderer.isBusy(now)) buffered = command;
+  // Only actions wait for animations; debug cheats and reward choices go through at once.
+  const action = command.type === 'move' || command.type === 'turn' || command.type === 'useAbility';
+  if (action && renderer.isBusy(now)) buffered = command;
   else run(command, now);
 }
 

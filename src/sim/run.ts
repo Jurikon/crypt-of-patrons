@@ -105,7 +105,7 @@ function makeOffer(rng: Rng, p: Player, reward: RewardKind): RewardOption[] {
   if (reward === 'modifier') for (const id of shuffle(rng, newModifiers(p))) picks.push({ kind: 'modifier', id });
   if (reward === 'elite' || reward === 'treasure' || reward === 'boss')
     for (const id of shuffle(rng, newItems(p))) picks.push({ kind: 'item', id });
-  if (reward === 'initiation') for (const id of otherClasses(p)) picks.push({ kind: 'class', id });
+  if (reward === 'initiation') for (const id of shuffle(rng, otherClasses(p))) picks.push({ kind: 'class', id });
   const offer = picks.slice(0, ACT.offer);
   for (const u of shuffle(rng, upgradeOptions(p))) {
     if (offer.length >= ACT.offer) break;

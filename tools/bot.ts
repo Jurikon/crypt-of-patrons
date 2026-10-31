@@ -149,8 +149,14 @@ export function carefulAction(_rng: Rng, state: GameState): Command {
     if (!ok || s === state) continue;
     const q = s.players[0]!;
     // Damage dealt is worth a bit more than health kept, so it trades blows instead of dancing forever.
+    const allyHp = (x: GameState) => x.allies.reduce((a, u) => a + u.hp, 0);
+    // Summons are worth their health: a raised skeleton is a second fighter, not a wasted turn.
     let score =
-      2 * q.hp + 2.5 * (foeHp(state) - foeHp(s)) + 5 * (state.enemies.length - s.enemies.length) - 0.3 * nearest(s);
+      2 * q.hp +
+      2.5 * (foeHp(state) - foeHp(s)) +
+      5 * (state.enemies.length - s.enemies.length) +
+      1.2 * (allyHp(s) - allyHp(state)) -
+      0.3 * nearest(s);
     if (q.hp <= 0) score -= 100;
     if (s.combat.status === 'won') score += 50;
     if (!best || score > best.score) best = { plan, score };
@@ -211,6 +217,14 @@ export interface RunResult {
   /** Room reached (ACT.rooms + 1 = the boss). */
   readonly depth: number;
   readonly turns: number;
+  /** What the hero ended up with. */
+  readonly build: {
+    classes: string[];
+    hybrid: string | null;
+    modifiers: string[];
+    items: string[];
+    abilities: string[];
+  };
 }
 
 /** Plays a whole act: fights with `strategy`, takes rewards, walks through doors. */
@@ -234,7 +248,14 @@ export function playRun(seed: number, classId: string, strategy: Strategy = 'gre
   }
   const run = state.run!;
   const result = run.phase === 'won' ? 'won' : run.phase === 'lost' ? 'lost' : 'stuck';
-  return { seed, result, depth: run.depth, turns: run.turns + state.combat.turn };
+  const p = state.players[0]!;
+  return {
+    seed,
+    result,
+    depth: run.depth,
+    turns: run.turns + state.combat.turn,
+    build: { classes: p.classes, hybrid: p.hybrid, modifiers: p.modifiers, items: p.items, abilities: p.abilities },
+  };
 }
 
 function startState(seed: number, classId: string, loadout: Loadout): GameState {
