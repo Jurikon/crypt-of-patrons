@@ -1,7 +1,7 @@
-import { getAbility } from '../content';
+import { getAbility, getClass, getModifier, getPassive, getStatus } from '../content';
 import { t, type TextKey } from '../i18n';
 import { cooldownOf, intentCells, type GameState } from '../sim';
-import { abilityName, describeAbility } from './describe';
+import { abilityName, describeAbility, describeRule } from './describe';
 import type { ViewState } from './store';
 
 export interface HudActions {
@@ -29,14 +29,34 @@ export function Hud({ view, actions, now }: { view: ViewState; actions: HudActio
   const notice = view.notice && now - view.notice.at < NOTICE_MS ? view.notice : null;
   const hp = view.shownHp ?? p.hp;
   const incoming = active && !view.busy && !p.god ? Math.min(hp, incomingDamage(game, p.id)) : 0;
+  const aimed = selected && ['line', 'unit', 'cell'].includes(selected.target.kind);
   const emptyTarget =
-    view.preview && !view.preview.rejected && view.preview.damage.size === 0 && view.preview.deaths.size === 0;
+    selected?.target.kind === 'front' &&
+    view.preview &&
+    !view.preview.rejected &&
+    view.preview.damage.size === 0 &&
+    view.preview.deaths.size === 0;
 
   return (
     <>
       <div class="turn-banner" data-testid="turn-banner">
         <span class="turn-number">{t('hud.turn', { n: game.combat.turn })}</span>
       </div>
+
+      {p.modifiers.length > 0 && (
+        <div class="mods" data-testid="modifiers">
+          <div class="mods-title">{t('hud.modifiers')}</div>
+          {p.modifiers.map((id) => {
+            const m = getModifier(id);
+            return (
+              <div key={id} class="mod" title={describeRule(m)}>
+                ✦ {t(m.nameKey as TextKey)}
+                <div class="mod-desc">{describeRule(m)}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {notice && (
         <div class="notice" data-testid="notice">
@@ -50,15 +70,25 @@ export function Hud({ view, actions, now }: { view: ViewState; actions: HudActio
             {t('hud.incoming', { n: incoming })}
           </div>
         )}
+        {p.freeActions > 0 && active && (
+          <div class="free-hint" data-testid="free-action">
+            {t('hud.freeReady')}
+          </div>
+        )}
         {selected && active && (
           <div class="selection-hint">
-            {t('hud.selected', { name: abilityName(selected) })}
+            {t(aimed ? 'hud.aim' : 'hud.selected', { name: abilityName(selected) })}
+            <div class="selection-sub">{describeAbility(selected)}</div>
             {emptyTarget && <div class="selection-sub">{t('hud.noTarget')}</div>}
           </div>
         )}
 
         <div class="hud" data-testid="hud">
           <div class="hud-vitals">
+            <div class="hud-class" title={p.passives.map((id) => describeRule(getPassive(id))).join('. ')}>
+              {t(getClass(p.classId).nameKey as TextKey)} ·{' '}
+              {p.passives.map((id) => t(getPassive(id).nameKey as TextKey)).join(', ')}
+            </div>
             <div class="hp" data-testid="hp">
               <span class="hud-label">{t('hud.hp')}</span>
               <div class="hp-bar">
@@ -74,6 +104,17 @@ export function Hud({ view, actions, now }: { view: ViewState; actions: HudActio
                 </span>
               </div>
             </div>
+            {p.statuses.length > 0 && (
+              <div class="hud-statuses">
+                {p.statuses.map((st) => (
+                  <span key={st.id} class="hud-status" title={t(getStatus(st.id).nameKey as TextKey)}>
+                    {getStatus(st.id).icon}
+                    {st.amount > 0 ? st.amount : ''}
+                    <sub>{st.turns}</sub>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
           <div class="abilities">

@@ -601,3 +601,157 @@ kbd {
 .result-buttons button:hover {
   background: #4a3020;
 }
+
+/* ---- M2: effects, classes, debug tools -------------------------------------------------------- */
+
+.debug {
+  max-height: calc(100% - 32px);
+  overflow-y: auto;
+}
+
+.debug-section {
+  margin-top: 10px;
+  color: var(--accent);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.debug button.active {
+  background: #5a3a18;
+  border-color: var(--accent);
+}
+
+.debug-select {
+  width: 100%;
+  margin-top: 6px;
+  font: inherit;
+  color: var(--ink);
+  background: #2a2018;
+  border: 1px solid var(--border);
+  padding: 4px;
+}
+
+.debug-slots span {
+  align-self: center;
+  color: var(--ink-dim);
+}
+
+.debug-mods {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.debug-mods label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  cursor: pointer;
+}
+
+.mods {
+  position: absolute;
+  right: 16px;
+  top: 140px;
+  max-width: 260px;
+  padding: 8px 10px;
+  font-size: 12px;
+  background: var(--panel);
+  border: 2px solid var(--border);
+}
+
+.mods-title {
+  color: var(--accent);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 4px;
+}
+
+.mod {
+  color: #cfe8ff;
+  margin-top: 4px;
+}
+
+.mod-desc {
+  color: var(--ink-dim);
+  font-size: 10px;
+}
+
+.free-hint {
+  padding: 5px 14px;
+  font-size: 13px;
+  color: #d8f0ff;
+  background: rgba(20, 50, 90, 0.9);
+  border: 2px solid #7fc0ff;
+  animation: pulse 0.6s ease-in-out infinite alternate;
+}
+
+.hud-class {
+  font-size: 11px;
+  color: var(--ink-dim);
+  margin-bottom: 4px;
+  cursor: help;
+}
+
+.hud-statuses {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 13px;
+}
+
+.hud-status sub {
+  font-size: 9px;
+  color: var(--ink-dim);
+}
+
+.unit-statuses {
+  text-align: center;
+  font-size: 13px;
+  line-height: 14px;
+  margin-bottom: 1px;
+  text-shadow: 0 0 3px #000;
+}
+
+.unit-hp.ally .hp-pip.full {
+  background: #4ec88a;
+}
+
+.floater-heal {
+  color: #7ee0a0;
+}
+
+.floater-info {
+  color: #cfe8ff;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.result-classes span {
+  align-self: center;
+  color: var(--ink-dim);
+}
+
+.ability-desc {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Crosshair for aiming (only while pointer lock is on). */
+.crosshair {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border: 2px solid rgba(220, 240, 255, 0.8);
+  border-radius: 50%;
+  box-shadow: 0 0 3px #000;
+}

@@ -5,6 +5,7 @@ import { CELL } from './dims';
 
 export const EYE_HEIGHT = 1.35;
 const STEP_MS = 150;
+const BLINK_MS = 90;
 const TURN_MS = 150;
 const BUMP_MS = 160;
 const TOP_MS = 320;
@@ -97,11 +98,19 @@ export class CameraRig {
   onEvent(e: GameEvent, now: number): void {
     switch (e.type) {
       case 'moved':
-        this.pos = { from: this.currentPos(now), to: cellCenter(e.to), start: now, duration: STEP_MS };
+      case 'teleported':
+      case 'swapped': {
+        // Dashes cover several cells; a teleport is a quick blink.
+        const dist = Math.abs(e.to.x - e.from.x) + Math.abs(e.to.y - e.from.y);
+        const duration = e.type === 'teleported' ? BLINK_MS : STEP_MS * Math.max(1, Math.sqrt(dist));
+        this.pos = { from: this.currentPos(now), to: cellCenter(e.to), start: now, duration };
         break;
+      }
       case 'turned': {
         // Accumulate yaw instead of wrapping, so the turn always takes the short way round.
-        const delta = (e.to - e.from + 4) % 4 === 1 ? -Math.PI / 2 : Math.PI / 2;
+        // Abilities can turn the player by 180° (teleport behind, aiming backwards).
+        const quarters = (e.to - e.from + 4) % 4;
+        const delta = quarters === 1 ? -Math.PI / 2 : quarters === 3 ? Math.PI / 2 : quarters === 2 ? Math.PI : 0;
         this.yaw = { from: this.currentYaw(now), to: this.yaw.to + delta, start: now, duration: TURN_MS };
         break;
       }
@@ -109,8 +118,8 @@ export class CameraRig {
       case 'abilityUsed': {
         // Walking into a wall and swinging at a cell share the same short lunge towards it.
         const at = cellCenter(e.type === 'bumped' ? e.at : e.target);
-        const dir = at.sub(this.pos.to).setY(0).normalize();
-        this.bump = { dir, start: now };
+        const dir = at.sub(this.pos.to).setY(0);
+        if (dir.lengthSq() > 1e-6) this.bump = { dir: dir.normalize(), start: now };
         break;
       }
       case 'damaged':

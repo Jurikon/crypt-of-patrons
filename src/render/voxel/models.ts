@@ -359,3 +359,52 @@ export function modelHeight(m: VoxelModel): number {
   for (const v of m.body) top = Math.max(top, v[1]);
   return (top + 1) * m.voxel;
 }
+
+/** A static prop lying on the floor (corpses, traps): voxels only, no moving parts. */
+export interface PropModel {
+  readonly voxel: number;
+  readonly palette: readonly Rgb[];
+  readonly voxels: readonly ModelVoxel[];
+  /** Voxels drawn glowing (trap runes), as palette indices. */
+  readonly glow: readonly number[];
+}
+
+function corpse(): PropModel {
+  const s = new Shape();
+  // A collapsed skeleton: skull on its side, scattered ribs, a long bone, a few loose pieces.
+  s.ellipsoid(-6, 2.5, 3, 3.2, 2.6, 3, 'bone');
+  s.set(-4, 3, 5, SOCKET);
+  s.set(-4, 2, 5, SOCKET);
+  s.set(-6, 1, 6, SOCKET);
+  for (const z of [-3, -1, 1]) for (let x = -1; x <= 5; x++) if ((x + z) % 7 !== 0) s.set(x, 0, z, boneAt(x, 0, z));
+  s.box(-1, 5, 1, 1, -3, -3, BONE_DARK);
+  s.box(-4, 8, 0, 0, 5, 6, 'bone');
+  s.box(-5, -5, 0, 1, 4, 7, BONE_DARK);
+  s.box(7, 8, 0, 1, 4, 7, BONE_DARK);
+  s.box(2, 3, 0, 0, -8, -6, 'bone');
+  s.box(-9, -8, 0, 0, -4, -3, 'bone');
+  s.set(6, 0, 0, BONE_DARK);
+  return { voxel: 0.045, palette: PALETTE, voxels: s.voxels(), glow: [] };
+}
+
+function trap(): PropModel {
+  const s = new Shape();
+  // An iron plate with spikes and four glowing runes at the corners.
+  s.box(-7, 7, 0, 0, -7, 7, IRON);
+  for (let x = -6; x <= 6; x += 3) for (let z = -6; z <= 6; z += 3) s.box(x, x, 1, 2, z, z, STEEL);
+  for (const [x, z] of [
+    [-7, -7],
+    [7, -7],
+    [-7, 7],
+    [7, 7],
+  ] as const)
+    s.set(x, 1, z, RUNE);
+  return { voxel: 0.045, palette: [...PALETTE, [0.3, 1.6, 2.4]], voxels: s.voxels(), glow: [RUNE] };
+}
+
+const RUNE = PALETTE.length;
+
+export const PROPS: Readonly<Record<string, PropModel>> = {
+  corpse: corpse(),
+  trap: trap(),
+};

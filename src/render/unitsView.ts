@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Dir, Vec2 } from '../core/grid';
-import { getEnemy } from '../content';
+import { getEnemy, getSummon } from '../content';
 import type { GameState, Intent } from '../sim';
 import { cellCenter } from './cameraRig';
 import { LAVA_Y } from './dims';
@@ -53,6 +53,8 @@ interface Rig {
 export interface UnitVisual {
   readonly id: string;
   readonly isPlayer: boolean;
+  /** Fights on the players' side (a summon). */
+  readonly ally: boolean;
   readonly type: string;
   cell: Vec2;
   dir: Dir;
@@ -67,29 +69,41 @@ export interface UnitVisual {
   dying: { start: number; dur: number; fall: boolean; splashed: boolean } | null;
   flashStart: number;
   strikeStart: number;
+  /** Rising out of the ground after being summoned. */
+  spawnStart: number;
+  /** Status ids currently on the unit, for the icons over its head. */
+  statuses: string[];
   rig: Rig | null;
 }
 
+const SPAWN_MS = 420;
+
 const outlineMaterial = new THREE.MeshBasicMaterial({ color: 0x2a0a08, side: THREE.BackSide });
 const eyeMaterial = new THREE.MeshBasicMaterial({ color: new THREE.Color(3.2, 0.75, 0.12) });
+/** Allies' eyes burn cold green, so a raised skeleton never reads as an enemy. */
+const allyEyeMaterial = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.35, 2.6, 1.3) });
+const allyOutlineMaterial = new THREE.MeshBasicMaterial({ color: 0x0a2a1a, side: THREE.BackSide });
 
 export class UnitsView {
   readonly group = new THREE.Group();
   readonly units = new Map<string, UnitVisual>();
   constructor(private readonly fx: Particles) {}
 
-  private buildRig(type: string, seq: number): Rig {
-    const model = MODELS[getEnemy(type).model] ?? (MODELS.warrior as (typeof MODELS)[string]);
+  private buildRig(type: string, ally: boolean, seq: number): Rig {
+    const modelId = ally ? getSummon(type).model : getEnemy(type).model;
+    const model = MODELS[modelId] ?? (MODELS.warrior as (typeof MODELS)[string]);
     const geo = modelGeometry(model);
-    const material = toonMaterial({ emissive: 0x000000 });
+    // Allies are a shade greener and darker: same bones, different master.
+    const material = toonMaterial({ emissive: 0x000000, ...(ally ? { color: 0xb8e0c0 } : {}) });
+    const line = ally ? allyOutlineMaterial : outlineMaterial;
     const root = new THREE.Group();
     const tilt = new THREE.Group();
     root.add(tilt);
-    tilt.add(new THREE.Mesh(geo.body.mesh, material), new THREE.Mesh(geo.body.outline, outlineMaterial));
-    tilt.add(new THREE.Mesh(geo.eyes, eyeMaterial));
+    tilt.add(new THREE.Mesh(geo.body.mesh, material), new THREE.Mesh(geo.body.outline, line));
+    tilt.add(new THREE.Mesh(geo.eyes, ally ? allyEyeMaterial : eyeMaterial));
     const arm = new THREE.Group();
     arm.position.copy(geo.pivot);
-    arm.add(new THREE.Mesh(geo.arm.mesh, material), new THREE.Mesh(geo.arm.outline, outlineMaterial));
+    arm.add(new THREE.Mesh(geo.arm.mesh, material), new THREE.Mesh(geo.arm.outline, line));
     tilt.add(arm);
     this.group.add(root);
     return {
@@ -118,8 +132,9 @@ export class UnitsView {
     const upsert = (
       id: string,
       isPlayer: boolean,
+      ally: boolean,
       type: string,
-      u: { x: number; y: number; dir: Dir; hp: number; maxHp: number },
+      u: { x: number; y: number; dir: Dir; hp: number; maxHp: number; statuses: readonly { id: string }[] },
       intent: Intent | null,
     ) => {
       seen.add(id);
@@ -128,6 +143,7 @@ export class UnitsView {
         v = {
           id,
           isPlayer,
+          ally,
           type,
           cell: { x: u.x, y: u.y },
           dir: u.dir,
@@ -141,10 +157,13 @@ export class UnitsView {
           dying: null,
           flashStart: -1e9,
           strikeStart: -1e9,
+          spawnStart: -1e9,
+          statuses: [],
           rig: null,
         };
         this.units.set(id, v);
       }
+      v.statuses = u.statuses.map((s) => s.id);
       v.cell = { x: u.x, y: u.y };
       v.pos = cellCenter(u);
       v.dir = u.dir;
@@ -156,13 +175,14 @@ export class UnitsView {
       v.lunge = null;
       v.dying = null;
       if (!isPlayer && v.alive && !v.rig) {
-        v.rig = this.buildRig(type, this.units.size);
+        v.rig = this.buildRig(type, ally, this.units.size);
         v.rig.yaw = yawFor(u.dir);
       }
       if (v.rig && !v.alive) this.dropRig(v);
     };
-    for (const p of state.players) upsert(p.id, true, p.classId, p, null);
-    for (const e of state.enemies) upsert(e.id, false, e.type, e, e.intent);
+    for (const p of state.players) upsert(p.id, true, false, p.classId, p, null);
+    for (const a of state.allies) upsert(a.id, false, true, a.type, a, null);
+    for (const e of state.enemies) upsert(e.id, false, false, e.type, e, e.intent);
     for (const [id, v] of this.units) {
       if (seen.has(id)) continue;
       this.dropRig(v);
@@ -173,6 +193,41 @@ export class UnitsView {
   clear(): void {
     for (const v of this.units.values()) this.dropRig(v);
     this.units.clear();
+  }
+
+  /** A summon appears mid-playback and climbs out of the ground. */
+  spawn(id: string, type: string, at: Vec2, dir: Dir, hp: number, now: number): void {
+    if (this.units.has(id)) return;
+    const v: UnitVisual = {
+      id,
+      isPlayer: false,
+      ally: true,
+      type,
+      cell: { x: at.x, y: at.y },
+      dir,
+      hp,
+      maxHp: getSummon(type).maxHp,
+      intent: null,
+      alive: true,
+      pos: cellCenter(at),
+      tween: null,
+      lunge: null,
+      dying: null,
+      flashStart: -1e9,
+      strikeStart: -1e9,
+      spawnStart: now,
+      statuses: [],
+      rig: this.buildRig(type, true, this.units.size),
+    };
+    if (v.rig) v.rig.yaw = yawFor(dir);
+    this.units.set(id, v);
+  }
+
+  setStatus(id: string, status: string, on: boolean): void {
+    const v = this.units.get(id);
+    if (!v) return;
+    v.statuses = v.statuses.filter((s) => s !== status);
+    if (on) v.statuses.push(status);
   }
 
   moveTo(id: string, to: Vec2, now: number, dur: number): void {
@@ -224,6 +279,7 @@ export class UnitsView {
   isAnimating(now: number): boolean {
     for (const v of this.units.values()) {
       if (v.tween && now - v.tween.start < v.tween.dur) return true;
+      if (now - v.spawnStart < SPAWN_MS) return true;
       if (v.lunge && now - v.lunge.start < v.lunge.dur) return true;
       if (v.dying && now - v.dying.start < v.dying.dur) return true;
     }
@@ -243,8 +299,10 @@ export class UnitsView {
       const r = v.rig;
       if (!r) continue;
       const p = v.pos.clone();
-      // Idle breathing and a hop while stepping.
+      // Idle breathing and a hop while stepping; summons rise out of the floor.
       p.y += Math.sin(s * 1.8 + r.phase) * 0.015 + walk * 0.08;
+      const rise = (now - v.spawnStart) / SPAWN_MS;
+      if (rise >= 0 && rise < 1) p.y -= (1 - ease(rise)) * r.height;
       if (v.lunge) {
         const t = (now - v.lunge.start) / v.lunge.dur;
         if (t >= 1) v.lunge = null;

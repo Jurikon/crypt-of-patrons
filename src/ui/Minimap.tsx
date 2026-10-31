@@ -50,6 +50,17 @@ export function Minimap({ game }: { game: GameState }) {
       for (const c of intentCells(game, e, e.intent).cells)
         ctx.fillRect(c.x * CELL_PX, c.y * CELL_PX, CELL_PX, CELL_PX);
     }
+    // Corpses and traps on the floor.
+    for (const sf of game.surfaces) {
+      ctx.fillStyle = sf.id === 'corpse' ? '#cbb89a' : '#7fd0ff';
+      ctx.fillRect((sf.x + 0.3) * CELL_PX, (sf.y + 0.3) * CELL_PX, CELL_PX * 0.4, CELL_PX * 0.4);
+    }
+    for (const a of game.allies) {
+      ctx.fillStyle = '#5ee0a0';
+      ctx.beginPath();
+      ctx.arc((a.x + 0.5) * CELL_PX, (a.y + 0.5) * CELL_PX, CELL_PX * 0.32, 0, Math.PI * 2);
+      ctx.fill();
+    }
     for (const e of game.enemies) {
       ctx.fillStyle = getEnemy(e.type).behavior.kind === 'ranged' ? '#e8a040' : '#e04030';
       ctx.beginPath();

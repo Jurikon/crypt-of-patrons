@@ -1,9 +1,11 @@
-import { t } from '../i18n';
+import { CLASSES } from '../content';
+import { t, type TextKey } from '../i18n';
 import type { GameState } from '../sim';
 
 export interface ResultActions {
   retry(): void;
   newRoom(): void;
+  setClass(classId: string): void;
 }
 
 /** Victory or death screen once the fight is over and its animations have finished. */
@@ -22,6 +24,14 @@ export function ResultScreen({ game, actions }: { game: GameState; actions: Resu
         <button type="button" onClick={actions.newRoom} data-testid="new-room">
           {t('result.newRoom')}
         </button>
+      </div>
+      <div class="result-buttons result-classes">
+        <span>{t('result.otherClass')}</span>
+        {CLASSES.filter((c) => c.id !== game.players[0]?.classId).map((c) => (
+          <button type="button" key={c.id} onClick={() => actions.setClass(c.id)} data-testid={`retry-${c.id}`}>
+            {t(c.nameKey as TextKey)}
+          </button>
+        ))}
       </div>
     </div>
   );

@@ -5,12 +5,15 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { createRng, fork, nextU32 } from '../core/rng';
 import { getCell, type Vec2 } from '../core/grid';
+import { MODIFIERS, getModifier, getStatus } from '../content';
+import { t, type TextKey } from '../i18n';
 import { intentCells, type Enemy, type GameEvent, type GameState, type Intent, type Preview, type Room } from '../sim';
 import { CameraRig, cellCenter } from './cameraRig';
 import { buildCaveMeshes, type CaveMeshes } from './caveMesh';
 import { CELL, WALL_H } from './dims';
 import { Particles } from './fx';
 import { Highlights, type Highlight } from './highlights';
+import { SurfacesView } from './surfacesView';
 import { UnitsView, type UnitVisual } from './unitsView';
 import { buildCave } from './voxel/cave';
 
@@ -43,6 +46,12 @@ const EVENT_MS: Partial<Record<GameEvent['type'], number>> = {
   collided: 110,
   fell: 380,
   died: 260,
+  allyAttack: 160,
+  projectile: 150,
+  area: 220,
+  summoned: 300,
+  teleported: 120,
+  swapped: 160,
 };
 const MOVE_MS = 140;
 const ENEMY_PHASE_PAUSE_MS = 0;
@@ -63,7 +72,11 @@ export interface ScreenPoint {
 export interface LabelUnit {
   readonly id: string;
   readonly isPlayer: boolean;
+  /** A summon fighting for the players. */
+  readonly ally: boolean;
   readonly type: string;
+  /** Status icons to show over the unit. */
+  readonly statuses: readonly string[];
   readonly hp: number;
   readonly maxHp: number;
   readonly intent: Intent | null;
@@ -75,7 +88,7 @@ export interface Floater {
   readonly id: number;
   readonly at: ScreenPoint;
   readonly text: string;
-  readonly kind: 'damage' | 'heal' | 'blocked';
+  readonly kind: 'damage' | 'heal' | 'blocked' | 'info';
   /** 0..1 */
   readonly age: number;
 }
@@ -142,7 +155,9 @@ export class GameRenderer {
   private target_: GameState | null = null;
   private enemyPhase = false;
   private needsSync = false;
-  private preview: { preview: Preview; target: Vec2 } | null = null;
+  private preview: { preview: Preview; target: Vec2; options: readonly Vec2[] } | null = null;
+  private readonly surfacesView = new SurfacesView();
+  private blasts: { cells: readonly Vec2[]; start: number }[] = [];
   private strikes: { cells: readonly Vec2[]; start: number }[] = [];
   private floaters: FloatingNumber[] = [];
   private floaterSeq = 0;
@@ -166,7 +181,15 @@ export class GameRenderer {
 
     this.scene.background = new THREE.Color(BACKGROUND);
     this.scene.fog = this.fog;
-    this.scene.add(this.hemi, this.topLight, this.camera, this.unitsView.group, this.highlights.group, this.fx.group);
+    this.scene.add(
+      this.hemi,
+      this.topLight,
+      this.camera,
+      this.unitsView.group,
+      this.surfacesView.group,
+      this.highlights.group,
+      this.fx.group,
+    );
     this.camera.add(this.torch);
     this.torch.position.set(0.6, 0.5, 0.3);
 
@@ -254,8 +277,10 @@ export class GameRenderer {
     this.enemyPhase = false;
     this.needsSync = false;
     this.strikes = [];
+    this.blasts = [];
     this.floaters = [];
     this.unitsView.sync(state);
+    this.surfacesView.sync(state);
     if (this.rig) this.rig.snap(state.room, player, now);
     else this.rig = new CameraRig(this.camera, state.room, player, now);
   }
@@ -268,8 +293,33 @@ export class GameRenderer {
   }
 
   /** The ability preview to draw (target cell, push path, damage numbers), or null. */
-  setPreview(preview: Preview | null, target: Vec2 | null): void {
-    this.preview = preview && target ? { preview, target } : null;
+  /** The ability preview to draw: valid target cells, the chosen one, pushes, blasts, numbers. */
+  setPreview(preview: Preview | null, target: Vec2 | null, options: readonly Vec2[] = []): void {
+    this.preview = preview && target ? { preview, target, options } : null;
+  }
+
+  /**
+   * The floor cell under a screen point (normalised device coordinates, −1..1), or null when the ray
+   * misses the floor. Used to aim with the crosshair or the mouse cursor.
+   */
+  cellAt(ndcX: number, ndcY: number): Vec2 | null {
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.camera);
+    const hit = ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), new THREE.Vector3());
+    if (!hit) return null;
+    return { x: Math.floor(hit.x / CELL), y: Math.floor(hit.z / CELL) };
+  }
+
+  private floater(unitId: string | null, text: string, kind: Floater['kind'], now: number): void {
+    const u = unitId ? this.unitsView.units.get(unitId) : undefined;
+    const onScreen = !u || u.isPlayer;
+    this.floaters.push({
+      id: this.floaterSeq++,
+      world: onScreen ? new THREE.Vector3() : this.unitsView.headPosition(u),
+      text,
+      kind,
+      start: now,
+    });
   }
 
   look(dx: number, dy: number): void {
@@ -321,6 +371,7 @@ export class GameRenderer {
           this.needsSync = false;
           this.enemyPhase = false;
           this.unitsView.sync(this.target_);
+          this.surfacesView.sync(this.target_);
         }
         return;
       }
@@ -376,14 +427,14 @@ export class GameRenderer {
         if (u) {
           u.hp = e.hp;
           v.flash(e.unitId, now);
-          const at = isPlayer ? null : v.headPosition(u);
-          this.floaters.push({
-            id: this.floaterSeq++,
-            world: at ?? new THREE.Vector3(),
-            text: e.amount > 0 ? `-${e.amount}` : '0',
-            kind: e.amount > 0 ? 'damage' : 'blocked',
-            start: now,
-          });
+          if (e.absorbed > 0) this.floater(e.unitId, `🛡-${e.absorbed}`, 'blocked', now);
+          if (e.amount > 0 || e.absorbed === 0)
+            this.floater(
+              e.unitId,
+              e.amount > 0 ? `-${e.amount}${e.backstab ? ' ✶' : ''}` : '0',
+              e.amount > 0 ? 'damage' : 'blocked',
+              now,
+            );
         }
         if (isPlayer) {
           rig.onEvent(e, now);
@@ -412,6 +463,69 @@ export class GameRenderer {
         if (u) u.intent = e.intent;
         return 0;
       }
+      case 'intentCanceled': {
+        const u = v.units.get(e.unitId);
+        if (u) u.intent = null;
+        return 0;
+      }
+      case 'teleported':
+        if (isPlayer) rig.onEvent(e, now);
+        else v.moveTo(e.unitId, e.to, now, EVENT_MS.teleported ?? 0);
+        this.fx.splash(cellCenter(e.from).setY(1), now, 14);
+        return EVENT_MS.teleported ?? 0;
+      case 'swapped':
+        if (isPlayer) rig.onEvent(e, now);
+        else v.moveTo(e.unitId, e.to, now, EVENT_MS.swapped ?? 0);
+        v.moveTo(e.otherId, e.from, now, EVENT_MS.swapped ?? 0);
+        return EVENT_MS.swapped ?? 0;
+      case 'allyAttack':
+        v.lungeTowards(e.unitId, e.target, now, EVENT_MS.allyAttack ?? 0, 0.7);
+        v.strike(e.unitId, now);
+        return EVENT_MS.allyAttack ?? 0;
+      case 'projectile': {
+        const from = cellCenter(e.from).setY(isPlayer ? 1.15 : 1.05);
+        this.fx.arrow(from, cellCenter(e.to).setY(1.05), now, EVENT_MS.projectile ?? 0);
+        return EVENT_MS.projectile ?? 0;
+      }
+      case 'area':
+        this.blasts.push({ cells: e.cells, start: now });
+        this.fx.splash(cellCenter(e.center).setY(0.8), now, 50);
+        return EVENT_MS.area ?? 0;
+      case 'summoned':
+        v.spawn(e.unitId, e.summon, e.at, e.dir, e.hp, now);
+        this.surfacesView.remove('corpse', e.at);
+        return EVENT_MS.summoned ?? 0;
+      case 'statusApplied':
+      case 'statusExpired':
+        v.setStatus(e.unitId, e.status, e.type === 'statusApplied');
+        if (e.type === 'statusApplied')
+          this.floater(
+            e.unitId,
+            `${getStatus(e.status).icon} ${t(getStatus(e.status).nameKey as TextKey)}`,
+            'info',
+            now,
+          );
+        return 0;
+      case 'surfaceAdded':
+        this.surfacesView.add(e.surface, e.at);
+        return 0;
+      case 'surfaceRemoved':
+        this.surfacesView.remove(e.surface, e.at);
+        return 0;
+      case 'healed':
+        if (e.amount > 0) this.floater(e.unitId, `+${e.amount}`, 'heal', now);
+        return 0;
+      case 'freeActionGained':
+        this.floater(null, t('hud.freeAction'), 'info', now);
+        return 0;
+      case 'triggered':
+        // Name the modifier that just fired, so combos read as combos.
+        if (MODIFIERS.some((m) => m.id === e.rule))
+          this.floater(e.ownerId, `✦ ${t(getModifier(e.rule).nameKey as TextKey)}`, 'info', now);
+        return 0;
+      case 'chainLimit':
+        console.info(`Trigger chain cut at depth ${e.depth}`);
+        return 0;
       case 'phaseChanged':
         this.enemyPhase = e.phase === 'enemy';
         return this.enemyPhase ? ENEMY_PHASE_PAUSE_MS : 0;
@@ -452,9 +566,17 @@ export class GameRenderer {
       }
     }
     if (this.preview && !this.isBusy(now)) {
-      const { preview, target } = this.preview;
+      const { preview, target, options } = this.preview;
+      for (const c of options) if (c.x !== target.x || c.y !== target.y) list.push({ cell: c, kind: 'option' });
       list.push({ cell: target, kind: 'target' });
+      for (const c of preview.areas) list.push({ cell: c, kind: 'blast', fade: 0.55 });
       for (const path of preview.pushPaths.values()) for (const c of path) list.push({ cell: c, kind: 'push' });
+      if (preview.playerTo) list.push({ cell: preview.playerTo, kind: 'dest' });
+    }
+    this.blasts = this.blasts.filter((b) => now - b.start < STRIKE_MS * 1.5);
+    for (const b of this.blasts) {
+      const fade = (now - b.start) / (STRIKE_MS * 1.5);
+      for (const c of b.cells) list.push({ cell: c, kind: 'blast', fade });
     }
     this.strikes = this.strikes.filter((s) => now - s.start < STRIKE_MS);
     for (const s of this.strikes) {
@@ -525,6 +647,8 @@ export class GameRenderer {
       units.push({
         id: u.id,
         isPlayer: false,
+        ally: u.ally,
+        statuses: u.statuses.map((id) => getStatus(id).icon),
         type: u.type,
         hp: u.hp,
         maxHp: u.maxHp,
@@ -557,10 +681,23 @@ export class GameRenderer {
         const path = this.preview.preview.pushPaths.get(id);
         const end = path?.[path.length - 1] ?? u.cell;
         const head = this.unitsView.headPosition({ ...u, pos: cellCenter(end) } as UnitVisual);
+        const icons = (this.preview.preview.statuses.get(id) ?? []).map((st) => getStatus(st).icon).join('');
         cells.push({
           at: this.project(head.setY(head.y + 0.35)),
-          text: dies ? '☠' : `-${dmg}`,
+          text: dies ? '☠' : `-${dmg}${icons ? ` ${icons}` : ''}`,
           kind: dies ? 'death' : 'preview',
+        });
+      }
+      // Statuses without damage (a taunt, a stun from a zero-damage effect).
+      for (const [id, list] of this.preview.preview.statuses) {
+        if (this.preview.preview.damage.has(id) || this.preview.preview.deaths.has(id)) continue;
+        const u = this.unitsView.units.get(id);
+        if (!u || u.isPlayer) continue;
+        const head = this.unitsView.headPosition(u);
+        cells.push({
+          at: this.project(head.setY(head.y + 0.35)),
+          text: list.map((st) => getStatus(st).icon).join(''),
+          kind: 'preview',
         });
       }
       for (const id of this.preview.preview.deaths) {
@@ -592,6 +729,7 @@ export class GameRenderer {
 
   dispose(): void {
     this.room?.dispose();
+    this.surfacesView.dispose();
     this.highlights.dispose();
     this.unitsView.clear();
     this.fx.dispose();

@@ -14,6 +14,10 @@ export interface InputHandlers {
   newSeed(): void;
   /** Raw mouse delta in pixels while pointer lock is active. */
   look(dx: number, dy: number): void;
+  /** Mouse wheel: step through an ability's targets (+1 / −1). */
+  cycleTarget(step: number): void;
+  /** Cursor position (normalised −1..1) while the pointer is not locked, for aiming with the cursor. */
+  pointer(ndcX: number, ndcY: number): void;
   pointerLockChanged(locked: boolean): void;
 }
 
@@ -27,7 +31,9 @@ export function attachInput(canvas: HTMLElement, handlers: InputHandlers, opts: 
   const bindings = opts.bindings ?? DEFAULT_BINDINGS;
 
   const isTyping = (e: KeyboardEvent) =>
-    e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
+    e.target instanceof HTMLInputElement ||
+    e.target instanceof HTMLTextAreaElement ||
+    e.target instanceof HTMLSelectElement;
 
   const onKeyDown = (e: KeyboardEvent) => {
     if (isTyping(e) || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -77,7 +83,19 @@ export function attachInput(canvas: HTMLElement, handlers: InputHandlers, opts: 
   const onContextMenu = (e: Event) => e.preventDefault();
 
   const onMouseMove = (e: MouseEvent) => {
-    if (locked()) handlers.look(e.movementX, e.movementY);
+    if (locked()) {
+      handlers.look(e.movementX, e.movementY);
+      return;
+    }
+    const r = canvas.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0)
+      handlers.pointer(((e.clientX - r.left) / r.width) * 2 - 1, 1 - ((e.clientY - r.top) / r.height) * 2);
+  };
+
+  const onWheel = (e: WheelEvent) => {
+    if (e.deltaY === 0) return;
+    e.preventDefault();
+    handlers.cycleTarget(e.deltaY > 0 ? 1 : -1);
   };
 
   const onLockChange = () => handlers.pointerLockChanged(locked());
@@ -88,6 +106,7 @@ export function attachInput(canvas: HTMLElement, handlers: InputHandlers, opts: 
   canvas.addEventListener('mousedown', onMouseDown);
   canvas.addEventListener('contextmenu', onContextMenu);
   document.addEventListener('mousemove', onMouseMove);
+  canvas.addEventListener('wheel', onWheel, { passive: false });
   document.addEventListener('pointerlockchange', onLockChange);
 
   return () => {
@@ -97,6 +116,7 @@ export function attachInput(canvas: HTMLElement, handlers: InputHandlers, opts: 
     canvas.removeEventListener('mousedown', onMouseDown);
     canvas.removeEventListener('contextmenu', onContextMenu);
     document.removeEventListener('mousemove', onMouseMove);
+    canvas.removeEventListener('wheel', onWheel);
     document.removeEventListener('pointerlockchange', onLockChange);
   };
 }

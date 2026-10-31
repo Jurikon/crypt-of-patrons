@@ -416,8 +416,11 @@ export function runEffects(eng: Engine, effects: readonly EffectSpec[], context:
         const from = pos(ctx.source);
         ctx.source.x = dest.x;
         ctx.source.y = dest.y;
-        ctx.source.dir = t.dir;
         events.push({ type: 'teleported', unitId: ctx.source.id, from, to: dest });
+        if (ctx.source.dir !== t.dir) {
+          events.push({ type: 'turned', unitId: ctx.source.id, from: ctx.source.dir, to: t.dir });
+          ctx.source.dir = t.dir;
+        }
         moved(eng, ctx.source, from, ctx.source, ctx.tags);
         break;
       }

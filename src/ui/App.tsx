@@ -20,6 +20,7 @@ export function App({ store, labels, actions }: { store: Store<ViewState>; label
       <WorldOverlay store={labels} />
       {hit && <div key={view.hitAt} class="hit-flash" />}
       <Minimap game={view.game} />
+      {view.pointerLocked && view.aim && <div class="crosshair" />}
       <Hud view={view} actions={actions} now={now} />
       {!view.pointerLocked && !over && (
         <div class="prompt" data-testid="click-to-play">

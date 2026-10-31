@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { toGeometry } from './caveMesh';
 import { createVolume, greedyMesh, setVoxel } from './voxel/mesher';
-import type { ModelVoxel, VoxelModel } from './voxel/models';
+import type { ModelVoxel, PropModel, VoxelModel } from './voxel/models';
 
 /** Outline thickness as a fraction of a voxel. */
 const OUTLINE = 0.3;
@@ -63,7 +63,11 @@ export interface ModelGeometry {
  * Builds one part. `yCentred` puts voxel y at [y−½, y+½] (arm, around its pivot) instead of [y, y+1]
  * (body, standing on y = 0). X and Z are always centred.
  */
-function buildPart(voxels: readonly ModelVoxel[], model: VoxelModel, yCentred: boolean): PartGeometry {
+function buildPart(
+  voxels: readonly ModelVoxel[],
+  model: Pick<VoxelModel, 'voxel' | 'palette'>,
+  yCentred: boolean,
+): PartGeometry {
   const s = model.voxel;
   let minX = Infinity;
   let minY = Infinity;
@@ -113,5 +117,30 @@ export function modelGeometry(model: VoxelModel): ModelGeometry {
   const [px, py, pz] = model.arm.pivot;
   const g: ModelGeometry = { model, body, arm, eyes, pivot: new THREE.Vector3(px * s, (py + 0.5) * s, pz * s) };
   cache.set(model, g);
+  return g;
+}
+
+export interface PropGeometry {
+  readonly mesh: THREE.BufferGeometry;
+  readonly outline: THREE.BufferGeometry;
+  /** Glowing voxels (vertex colours above 1 feed the bloom), or null. */
+  readonly glow: THREE.BufferGeometry | null;
+}
+
+const propCache = new Map<PropModel, PropGeometry>();
+
+/** Geometry for a floor prop, built once and shared. */
+export function propGeometry(prop: PropModel): PropGeometry {
+  const hit = propCache.get(prop);
+  if (hit) return hit;
+  const solid = prop.voxels.filter((v) => !prop.glow.includes(v[3]));
+  const glowing = prop.voxels.filter((v) => prop.glow.includes(v[3]));
+  const body = buildPart(solid, prop, false);
+  const g: PropGeometry = {
+    mesh: body.mesh,
+    outline: body.outline,
+    glow: glowing.length ? buildPart(glowing, prop, false).mesh : null,
+  };
+  propCache.set(prop, g);
   return g;
 }

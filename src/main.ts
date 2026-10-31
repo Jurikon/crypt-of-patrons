@@ -4,8 +4,9 @@ import { formatHash, parseHash, randomSeed } from './debug/url';
 import { detectLang, setLang, t } from './i18n';
 import { attachInput } from './input/input';
 import { GameRenderer, type Quality } from './render/renderer';
-import { add, dirVec } from './core/grid';
-import { apply, createGame, preview, type Command, type DebugAction, type GameState } from './sim';
+import type { Vec2 } from './core/grid';
+import { CLASSES, getAbility } from './content';
+import { apply, createGame, preview, validTargets, type Command, type DebugAction, type GameState } from './sim';
 import { App, ErrorScreen, type AppActions } from './ui/App';
 import { createStore, type LabelsStore, type ViewState } from './ui/store';
 
@@ -21,13 +22,22 @@ const uiEl = document.getElementById('ui') as HTMLElement;
 // Seed from the URL, or a fresh one written back so the link reproduces this room.
 const params = parseHash(location.hash);
 let seed = params.seed ?? randomSeed();
-if (params.seed === null) history.replaceState(null, '', formatHash({ seed, debug: params.debug }));
+const knownClass = (id: string | null | undefined) => (CLASSES.some((c) => c.id === id) ? (id as string) : 'knight');
+let classId = knownClass(params.classId);
+const writeHash = () =>
+  history.replaceState(null, '', formatHash({ seed, classId, debug: parseHash(location.hash).debug }));
+if (params.seed === null) writeHash();
 
-let state: GameState = createGame(seed);
+let state: GameState = createGame(seed, { classId });
 /** Every command since the room was created: seed + this list reproduces the session exactly. */
 let commands: Command[] = [];
 let buffered: Command | null = null;
 let selected: string | null = null;
+/** Where the selected ability is aimed; `aimManual` once the wheel picked a target. */
+let aim: Vec2 | null = null;
+let aimManual = false;
+/** Cursor position (−1..1) when the pointer is not locked. */
+let pointerNdc = { x: 0, y: 0 };
 
 const QUALITY_KEY = 'cop.quality';
 /** The player's saved choice, or null if they never picked one. */
@@ -70,22 +80,71 @@ const store = createStore<ViewState>({
   hitAt: -1e9,
   shownHp: null,
   quality,
+  aim: null,
 });
 const labels: LabelsStore = createStore({ labels: null });
 
 const player = () => state.players[0];
 
+const same = (a: Vec2 | null, b: Vec2 | null) => !!a && !!b && a.x === b.x && a.y === b.y;
+
+/** Abilities aimed at a chosen cell (lines, units, cells) rather than straight ahead or at yourself. */
+function aimable(abilityId: string | null): boolean {
+  if (!abilityId) return false;
+  const k = getAbility(abilityId).target.kind;
+  return k === 'line' || k === 'unit' || k === 'cell';
+}
+
+function targetOptions(): Vec2[] {
+  const p = player();
+  return p && selected ? validTargets(state, p, getAbility(selected)) : [];
+}
+
 /** Recomputes the ability preview: the same `apply` on the current state, nothing committed. */
 function refreshPreview(): void {
   const p = player();
   if (!selected || !p || state.combat.status !== 'active') {
+    aim = null;
     renderer.setPreview(null, null);
-    store.set({ selected, preview: null });
+    store.set({ selected, preview: null, aim: null });
     return;
   }
-  const pv = preview(state, { type: 'useAbility', playerId: PLAYER_ID, abilityId: selected });
-  renderer.setPreview(pv, add(p, dirVec(p.dir)));
-  store.set({ selected, preview: pv });
+  const options = targetOptions();
+  if (!aimable(selected)) aim = options[0] ?? null;
+  else if (!options.some((o) => same(o, aim))) aim = options[0] ?? null;
+  const command: Command = aim
+    ? { type: 'useAbility', playerId: PLAYER_ID, abilityId: selected, target: aim }
+    : { type: 'useAbility', playerId: PLAYER_ID, abilityId: selected };
+  const pv = preview(state, command);
+  renderer.setPreview(pv, aim, aimable(selected) ? options : []);
+  store.set({ selected, preview: pv, aim });
+}
+
+/** Follows the crosshair (or the cursor): the valid target nearest to the floor cell under it. */
+function updateAim(): void {
+  if (!aimable(selected) || aimManual || renderer.isBusy(performance.now())) return;
+  const ndc = document.pointerLockElement ? { x: 0, y: 0 } : pointerNdc;
+  const cell = renderer.cellAt(ndc.x, ndc.y);
+  const options = targetOptions();
+  if (!cell || options.length === 0) return;
+  let best = options[0] as Vec2;
+  for (const o of options)
+    if (Math.abs(o.x - cell.x) + Math.abs(o.y - cell.y) < Math.abs(best.x - cell.x) + Math.abs(best.y - cell.y))
+      best = o;
+  if (!same(best, aim)) {
+    aim = best;
+    refreshPreview();
+  }
+}
+
+function cycleTarget(step: number): void {
+  if (!aimable(selected)) return;
+  const options = targetOptions();
+  if (options.length === 0) return;
+  const i = options.findIndex((o) => same(o, aim));
+  aim = options[(i + step + options.length) % options.length] ?? null;
+  aimManual = true;
+  refreshPreview();
 }
 
 function run(command: Command, now: number): void {
@@ -116,19 +175,27 @@ function dispatch(command: Command): void {
 
 function loadSeed(next: number): void {
   seed = next;
-  state = createGame(seed);
+  state = createGame(seed, { classId });
   commands = [];
   buffered = null;
   selected = null;
+  aimManual = false;
   renderer.reset(state, performance.now());
   store.set({ game: state, notice: null });
   refreshPreview();
 }
 
 function newSeed(): void {
-  const next = randomSeed();
-  history.replaceState(null, '', formatHash({ seed: next, debug: parseHash(location.hash).debug }));
-  loadSeed(next);
+  seed = randomSeed();
+  writeHash();
+  loadSeed(seed);
+}
+
+/** Restarts the same room with another class. */
+function setClass(id: string): void {
+  classId = knownClass(id);
+  writeHash();
+  loadSeed(seed);
 }
 
 function selectAbility(slot: number): void {
@@ -139,6 +206,7 @@ function selectAbility(slot: number): void {
     return;
   }
   selected = id;
+  aimManual = false;
   refreshPreview();
 }
 
@@ -146,7 +214,11 @@ function selectAbility(slot: number): void {
 function confirm(): void {
   const abilityId = selected ?? player()?.abilities[0];
   if (!abilityId || state.combat.status !== 'active') return;
-  dispatch({ type: 'useAbility', playerId: PLAYER_ID, abilityId });
+  dispatch(
+    aimable(abilityId) && aim
+      ? { type: 'useAbility', playerId: PLAYER_ID, abilityId, target: aim }
+      : { type: 'useAbility', playerId: PLAYER_ID, abilityId },
+  );
 }
 
 function cancel(): void {
@@ -156,8 +228,12 @@ function cancel(): void {
 
 const actions: AppActions = {
   newSeed,
-  exportState: () => JSON.stringify({ seed, commands }),
+  exportState: () => JSON.stringify({ seed, classId, commands }),
   cheat: (action: DebugAction) => dispatch({ type: 'debug', playerId: PLAYER_ID, action }),
+  setClass,
+  grantAbility: (abilityId: string, slot: number) =>
+    dispatch({ type: 'debugGrant', playerId: PLAYER_ID, abilityId, slot }),
+  toggleModifier: (modifierId: string) => dispatch({ type: 'debugModifier', playerId: PLAYER_ID, modifierId }),
   toggleQuality: () => {
     const quality: Quality = store.get().quality === 'high' ? 'low' : 'high';
     renderer.setQuality(quality);
@@ -186,7 +262,15 @@ attachInput(
     },
     toggleDebug: () => store.set({ debugOpen: !store.get().debugOpen }),
     newSeed,
-    look: (dx, dy) => renderer.look(dx, dy),
+    look: (dx, dy) => {
+      renderer.look(dx, dy);
+      aimManual = false;
+    },
+    cycleTarget,
+    pointer: (x, y) => {
+      pointerNdc = { x, y };
+      aimManual = false;
+    },
     pointerLockChanged: (locked) => store.set({ pointerLocked: locked }),
   },
   { playerId: PLAYER_ID },
@@ -194,7 +278,11 @@ attachInput(
 
 window.addEventListener('hashchange', () => {
   const p = parseHash(location.hash);
-  if (p.seed !== null && p.seed !== seed) loadSeed(p.seed);
+  const nextClass = knownClass(p.classId);
+  if ((p.seed !== null && p.seed !== seed) || nextClass !== classId) {
+    classId = nextClass;
+    loadSeed(p.seed ?? seed);
+  }
   if (p.debug && !store.get().debugOpen) store.set({ debugOpen: true });
 });
 window.addEventListener('resize', () => renderer.resize());
@@ -212,6 +300,7 @@ function frame(now: number): void {
     run(c, now);
   }
   labels.set({ labels: renderer.render(now) });
+  if (selected) updateAim();
   const busy = renderer.isBusy(now);
   if (busy !== wasBusy) {
     wasBusy = busy;

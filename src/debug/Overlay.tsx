@@ -1,4 +1,6 @@
 import { useState } from 'preact/hooks';
+import { ABILITIES, ABILITY_SLOTS, CLASSES, MODIFIERS } from '../content';
+import { abilityName, describeAbility, describeRule } from '../ui/describe';
 import { t, type TextKey } from '../i18n';
 import type { DebugAction } from '../sim';
 import type { ViewState } from '../ui/store';
@@ -10,11 +12,16 @@ export interface OverlayActions {
   /** Debug cheats go through the simulation as commands, so bug reports replay exactly. */
   cheat(action: DebugAction): void;
   toggleQuality(): void;
+  /** Restart the room with another class. */
+  setClass(classId: string): void;
+  grantAbility(abilityId: string, slot: number): void;
+  toggleModifier(modifierId: string): void;
 }
 
 /** Debug overlay toggled with the backquote key. */
 export function DebugOverlay({ view, actions }: { view: ViewState; actions: OverlayActions }) {
   const [copied, setCopied] = useState(false);
+  const [grant, setGrant] = useState(ABILITIES[0]?.id ?? '');
   const { game, fps } = view;
   const p = game.players[0];
 
@@ -68,6 +75,67 @@ export function DebugOverlay({ view, actions }: { view: ViewState; actions: Over
         <button type="button" onClick={() => actions.cheat('toggleGod')} data-testid="god">
           {t('debug.god')}: {p?.god ? t('debug.on') : t('debug.off')}
         </button>
+      </div>
+
+      <div class="debug-section">{t('debug.class')}</div>
+      <div class="debug-buttons">
+        {CLASSES.map((c) => (
+          <button
+            type="button"
+            key={c.id}
+            class={p?.classId === c.id ? 'active' : ''}
+            onClick={() => actions.setClass(c.id)}
+            data-testid={`class-${c.id}`}
+          >
+            {t(c.nameKey as TextKey)}
+          </button>
+        ))}
+      </div>
+
+      <div class="debug-section">{t('debug.grant')}</div>
+      <select
+        class="debug-select"
+        value={grant}
+        onChange={(e) => setGrant((e.target as HTMLSelectElement).value)}
+        data-testid="grant-select"
+      >
+        {CLASSES.map((c) => (
+          <optgroup key={c.id} label={t(c.nameKey as TextKey)}>
+            {ABILITIES.filter((a) => [...c.abilities, ...c.pool].includes(a.id)).map((a) => (
+              <option key={a.id} value={a.id} title={describeAbility(a)}>
+                {abilityName(a)}
+              </option>
+            ))}
+          </optgroup>
+        ))}
+      </select>
+      <div class="debug-buttons debug-slots">
+        <span>{t('debug.slot')}</span>
+        {Array.from({ length: ABILITY_SLOTS }, (_, i) => (
+          <button
+            type="button"
+            key={i}
+            onClick={() => actions.grantAbility(grant, i + 1)}
+            data-testid={`grant-${i + 1}`}
+          >
+            {i + 2}
+          </button>
+        ))}
+      </div>
+
+      <div class="debug-section">{t('debug.modifiers')}</div>
+      <div class="debug-mods">
+        {MODIFIERS.map((m) => (
+          <label key={m.id} title={describeRule(m)}>
+            <input
+              type="checkbox"
+              checked={p?.modifiers.includes(m.id) ?? false}
+              onChange={() => actions.toggleModifier(m.id)}
+              data-testid={`mod-${m.id}`}
+            />
+            {t(m.nameKey as TextKey)}
+          </label>
+        ))}
       </div>
     </div>
   );

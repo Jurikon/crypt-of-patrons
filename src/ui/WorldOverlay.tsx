@@ -20,7 +20,9 @@ export function WorldOverlay({ store }: { store: LabelsStore }) {
     <div class="world-overlay">
       {labels.units.map((u) => (u.head.onScreen ? <UnitTag key={u.id} u={u} fade={fade} /> : null))}
       {labels.topView < 0.5 &&
-        labels.units.map((u) => (u.head.onScreen ? null : <EdgeArrow key={u.id} u={u} w={width} h={height} />))}
+        labels.units.map((u) =>
+          u.head.onScreen || u.ally ? null : <EdgeArrow key={u.id} u={u} w={width} h={height} />,
+        )}
       {labels.cells.map((c, i) =>
         c.at.onScreen ? (
           <div key={i} class={`cell-label cell-${c.kind}`} style={{ left: `${c.at.x}px`, top: `${c.at.y}px` }}>
@@ -55,15 +57,16 @@ function UnitTag({ u, fade }: { u: LabelUnit; fade: number }) {
         transform: `translate(-50%, -100%) scale(${scale})`,
         opacity: String(fade),
       }}
-      title={t(`enemy.${u.type}` as TextKey)}
+      title={u.ally ? t('hud.ally') : t(`enemy.${u.type}` as TextKey)}
     >
+      {u.statuses.length > 0 && <div class="unit-statuses">{u.statuses.join('')}</div>}
       {u.intent && (
         <div class="intent-badge">
           <span class="intent-icon">{intentIcon(u.intent)}</span>
           <span class="intent-dmg">{u.intent.damage}</span>
         </div>
       )}
-      <div class="unit-hp">
+      <div class={u.ally ? 'unit-hp ally' : 'unit-hp'}>
         {Array.from({ length: u.maxHp }, (_, i) => (
           <span key={i} class={i < u.hp ? 'hp-pip full' : 'hp-pip'} />
         ))}

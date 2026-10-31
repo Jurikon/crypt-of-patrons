@@ -22,6 +22,8 @@ export interface ViewState {
   readonly shownHp: number | null;
   /** Graphics quality (debug menu); remembered per browser. */
   readonly quality: Quality;
+  /** Where the selected ability is aimed (null for abilities without a choice of target). */
+  readonly aim: { readonly x: number; readonly y: number } | null;
 }
 
 export interface Store<T> {

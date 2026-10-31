@@ -12,6 +12,7 @@ export type Action =
   | 'ability2'
   | 'ability3'
   | 'ability4'
+  | 'ability5'
   | 'confirm'
   | 'cancel'
   | 'topView'
@@ -36,6 +37,7 @@ export const DEFAULT_BINDINGS: Bindings = {
   Digit2: 'ability2',
   Digit3: 'ability3',
   Digit4: 'ability4',
+  Digit5: 'ability5',
   KeyF: 'confirm',
   Enter: 'confirm',
   Escape: 'cancel',
@@ -45,7 +47,7 @@ export const DEFAULT_BINDINGS: Bindings = {
   KeyR: 'newSeed',
 };
 
-export const ABILITY_ACTIONS: readonly Action[] = ['ability1', 'ability2', 'ability3', 'ability4'];
+export const ABILITY_ACTIONS: readonly Action[] = ['ability1', 'ability2', 'ability3', 'ability4', 'ability5'];
 
 export function actionToCommand(action: Action, playerId: string): Command | null {
   switch (action) {
