@@ -1,0 +1,139 @@
+:root {
+  color-scheme: dark;
+  --bg: #070504;
+  --ink: #e8d9c0;
+  --ink-dim: #a8957a;
+  --accent: #ffc04a;
+  --panel: rgba(12, 9, 7, 0.82);
+  --border: #4a3a2a;
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+#game,
+#ui {
+  position: fixed;
+  inset: 0;
+}
+
+#ui {
+  pointer-events: none;
+}
+
+.game-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* Low-res render upscaled without smoothing: the PS1 look. */
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  cursor: pointer;
+}
+
+.minimap {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  border: 2px solid var(--border);
+  background: #000;
+  image-rendering: pixelated;
+  opacity: 0.9;
+  box-shadow: 0 0 0 2px #000;
+}
+
+.prompt {
+  position: absolute;
+  left: 50%;
+  bottom: 12%;
+  transform: translateX(-50%);
+  max-width: calc(100% - 32px);
+  padding: 14px 22px;
+  text-align: center;
+  background: var(--panel);
+  border: 2px solid var(--border);
+  text-shadow: 0 1px 0 #000;
+}
+
+.prompt-title {
+  font-size: 20px;
+  color: var(--accent);
+  letter-spacing: 0.04em;
+}
+
+.prompt-controls {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+.prompt-error {
+  bottom: 50%;
+}
+
+.debug {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  min-width: 240px;
+  padding: 10px 12px;
+  font-size: 12px;
+  background: var(--panel);
+  border: 2px solid var(--border);
+  pointer-events: auto;
+}
+
+.debug-title {
+  color: var(--accent);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.debug table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.debug th {
+  text-align: left;
+  font-weight: normal;
+  color: var(--ink-dim);
+  padding: 1px 12px 1px 0;
+}
+
+.debug td {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.debug-buttons {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.debug button {
+  flex: 1;
+  font: inherit;
+  color: var(--ink);
+  background: #2a2018;
+  border: 1px solid var(--border);
+  padding: 5px 6px;
+  cursor: pointer;
+}
+
+.debug button:hover {
+  background: #3a2c20;
+}
