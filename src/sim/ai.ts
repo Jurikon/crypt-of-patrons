@@ -224,6 +224,9 @@ function planRanged(state: GameState, e: Enemy, move: number, minRange: number, 
     }
     return best;
   };
+  // Already able to shoot: hold position. Kiting to the "ideal" range every turn made archers uncatchable.
+  const here = lineScore(e);
+  if (here) return { path: [], face: dirTowards(e, here.victim) };
   let target = chooseCell(state, b, move, (c) => lineScore(c)?.score ?? null);
   if (target === null) {
     // No firing position this turn: walk the shortest route to the nearest one. (Greedily improving
@@ -255,7 +258,7 @@ function plan(state: GameState, e: Enemy): Plan {
   const def = getEnemy(e.type);
   return def.behavior.kind === 'melee'
     ? planMelee(state, e, def.move)
-    : planRanged(state, e, def.move, def.behavior.minRange, def.behavior.maxRange);
+    : planRanged(state, e, e.moved ? 0 : def.move, def.behavior.minRange, def.behavior.maxRange);
 }
 
 /** Enemy phase, second half: every enemy moves, turns and telegraphs its next attack. */
@@ -274,6 +277,10 @@ export function advanceEnemies(state: GameState, events: GameEvent[]): void {
       events.push({ type: 'turned', unitId: e.id, from: e.dir, to: face });
       e.dir = face;
     }
+    e.moved = path.length > 0;
+    // A ranged enemy either moves or aims in one turn, never both, and after a move it stands for a turn:
+    // otherwise it kites forever at the player's own speed.
+    if (e.moved && getEnemy(e.type).behavior.kind === 'ranged') continue;
     e.intent = makeIntent(getEnemy(e.type).attack, e.dir);
     events.push({ type: 'intentDeclared', unitId: e.id, intent: e.intent });
   }

@@ -5,7 +5,7 @@ import { generateRoom, type Room } from './gen/room';
 import { placeEncounter } from './encounter';
 import { declareIntentsInPlace } from './ai';
 
-export const STATE_VERSION = 3;
+export const STATE_VERSION = 4;
 
 export interface Cooldown {
   readonly abilityId: string;
@@ -39,6 +39,8 @@ export type Intent =
 export interface Enemy extends UnitBase {
   readonly type: string;
   intent: Intent | null;
+  /** Moved during the last enemy phase. Ranged enemies must then stand still for a turn. */
+  moved: boolean;
 }
 
 export type Unit = Player | Enemy;

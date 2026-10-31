@@ -44,6 +44,7 @@ export function stateFromMap(map: string, opts: { enemyDir?: Dir; intents?: bool
           hp: def.maxHp,
           maxHp: def.maxHp,
           intent: opts.intents ? makeIntent(def.attack, enemyDir) : null,
+          moved: false,
         });
         cells.push('floor');
       } else {

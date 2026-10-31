@@ -69,6 +69,7 @@ export function placeEncounter(rng: Rng, state: GameState): Enemy[] {
       hp: getEnemy(def.id).maxHp,
       maxHp: getEnemy(def.id).maxHp,
       intent: null,
+      moved: false,
     });
   }
   return enemies;

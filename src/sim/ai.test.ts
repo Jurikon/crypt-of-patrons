@@ -53,7 +53,7 @@ describe('enemy AI', () => {
     expect(Math.abs(w.x - 1) + Math.abs(w.y - 1)).toBe(1);
   });
 
-  it('an archer lines up with the player at range and keeps distance', () => {
+  it('an archer lines up with the player at range and then aims', () => {
     const s = stateFromMap(`
       #########
       #^......#
@@ -62,13 +62,75 @@ describe('enemy AI', () => {
       #.......#
       #########`);
     let st = s;
-    for (let i = 0; i < 3; i++) st = apply(st, pass).state;
+    let aimed = false;
+    for (let i = 0; i < 6 && !aimed; i++) {
+      st = apply(st, pass).state;
+      const a = st.enemies[0]!;
+      aimed = a.intent !== null && (a.x === 1 || a.y === 1);
+    }
     const a = st.enemies[0]!;
     const d = Math.abs(a.x - 1) + Math.abs(a.y - 1);
-    expect(a.x === 1 || a.y === 1).toBe(true);
+    expect(aimed).toBe(true);
     expect(d).toBeGreaterThanOrEqual(2);
     expect(d).toBeLessThanOrEqual(5);
     expect(a.intent?.kind).toBe('line');
+  });
+
+  it('an archer either moves or aims in a turn, never both', () => {
+    const s = stateFromMap(`
+      #########
+      #^......#
+      #.......#
+      #.....A.#
+      #.......#
+      #########`);
+    let st = s;
+    for (let i = 0; i < 10; i++) {
+      const { state, events } = apply(st, pass);
+      const moved = events.some((e) => e.type === 'moved' && e.unitId === 'e1');
+      const aimed = events.some((e) => e.type === 'intentDeclared' && e.unitId === 'e1');
+      expect(moved && aimed).toBe(false);
+      st = state;
+    }
+  });
+
+  it('an archer that can already shoot holds position instead of backing off', () => {
+    const s = stateFromMap(`
+      #########
+      #.......#
+      #>....A.#
+      #.......#
+      #########`);
+    // Player walks straight at the archer: 5, 4, 3, 2 cells away. It should stand and shoot, not retreat.
+    let st = s;
+    for (let i = 0; i < 3; i++) st = apply(st, { type: 'move', playerId: 'p1', dir: 'forward' }).state;
+    expect(st.enemies[0]).toMatchObject({ x: 6, y: 2 });
+  });
+
+  it('a chased archer can be caught and killed', () => {
+    const s = stateFromMap(`
+      ###########
+      #.........#
+      #.........#
+      #....>A...#
+      #.........#
+      #.........#
+      ###########`);
+    let st = s;
+    for (let i = 0; i < 40 && st.enemies.length > 0; i++) {
+      const p = st.players[0]!;
+      const a = st.enemies[0]!;
+      const dx = a.x - p.x;
+      const dy = a.y - p.y;
+      const want = Math.abs(dx) >= Math.abs(dy) ? (dx > 0 ? 1 : 3) : dy > 0 ? 2 : 0;
+      const cmd =
+        want === p.dir
+          ? ({ type: 'move', playerId: 'p1', dir: 'forward' } as const)
+          : ({ type: 'turn', playerId: 'p1', dir: (want - p.dir + 4) % 4 === 1 ? 'right' : 'left' } as const);
+      st = apply(st, cmd).state;
+    }
+    expect(st.enemies).toHaveLength(0);
+    expect(st.players[0]!.hp).toBeGreaterThan(0);
   });
 
   it('regression (bot seed 171): an archer cornered behind pits still finds a firing position', () => {
