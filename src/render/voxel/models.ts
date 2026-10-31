@@ -395,10 +395,66 @@ function warden(): VoxelModel {
   };
 }
 
+/** A heap of bones knitted into a wall (the Necromancer's Bone wall): no arms, no eyes worth the name. */
+function boneWall(): VoxelModel {
+  const body = new Shape();
+  for (let y = 0; y <= 30; y++) {
+    const half = 9 - Math.floor(y / 6);
+    for (let x = -half; x <= half; x++)
+      for (let z = -2; z <= 2; z++) {
+        if (hash3(x, y, z + 7) < 0.25 + y / 70) continue;
+        body.set(x, y, z, (x * 3 + y * 5 + z) % 7 === 0 ? BONE_DARK : boneAt(x, y, z));
+      }
+  }
+  // Skulls stuck in the heap, glowing faintly.
+  const eyes: [number, number, number][] = [];
+  for (const [x, y] of [
+    [-4, 10],
+    [4, 16],
+    [0, 24],
+  ] as const) {
+    body.ellipsoid(x, y, 2.5, 2, 2, 1.6, 'bone');
+    eyes.push([x - 1, y, 4], [x + 1, y, 4]);
+  }
+  const arm = new Shape();
+  arm.set(0, -1, 0, BONE_DARK);
+  return {
+    voxel: 0.05,
+    palette: PALETTE,
+    body: body.voxels(),
+    arm: { pivot: [0, 12, 0], voxels: arm.voxels() },
+    eyes,
+    poses: { idle: 0, windup: 0, strike: 0 },
+  };
+}
+
+/** The mirror dagger's decoy: a hooded figure of smoke-dark cloth. */
+function decoy(): VoxelModel {
+  const { body, eyes } = skeleton(1);
+  body.ellipsoid(0, 41.5, -0.6, 6.2, 6, 6.2, CLOTH_DARK, 0.22);
+  for (let y = 8; y <= 33; y++) {
+    const half = 4 + Math.floor((33 - y) / 4);
+    for (let x = -half; x <= half; x++)
+      for (const z of [-4, 4]) if (hash3(x, y, z) > 0.2) body.set(x, y, z, CLOTH_DARK);
+  }
+  const arm = new Shape();
+  armBones(arm, -1);
+  return {
+    voxel: 0.04,
+    palette: PALETTE,
+    body: body.voxels(),
+    arm: { pivot: [-7, 32, 0], voxels: arm.voxels() },
+    eyes,
+    poses: { idle: -0.3, windup: -0.3, strike: -0.3 },
+  };
+}
+
 export const MODELS: Readonly<Record<string, VoxelModel>> = {
   warrior: warrior(),
   archer: archer(),
   warden: warden(),
+  boneWall: boneWall(),
+  decoy: decoy(),
 };
 
 /** Top of the model in world units, for placing labels. */

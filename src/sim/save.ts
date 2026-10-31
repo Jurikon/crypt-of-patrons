@@ -44,6 +44,19 @@ const STATE_MIGRATIONS: Record<number, (s: Json) => Json> = {
       log: [{ type: 'room', depth: 1, kind: 'combat' }],
     },
   }),
+  // v6 → v7 (M4): several classes, hybrids, items, Initiation and treasure doors.
+  6: (s) => ({
+    ...s,
+    version: 7,
+    players: (s.players as Json[]).map((p) => ({
+      classes: [p.classId],
+      hybrid: null,
+      items: [],
+      ruleUses: [],
+      ...p,
+    })),
+    run: s.run ? { initiation: false, treasures: 0, ...(s.run as Json) } : null,
+  }),
 };
 
 export function migrateState(raw: unknown): GameState | null {

@@ -18,6 +18,10 @@ export type Command =
   | { readonly type: 'debugGrant'; readonly playerId: string; readonly abilityId: string; readonly slot: number }
   /** Debug: switch a modifier on or off. */
   | { readonly type: 'debugModifier'; readonly playerId: string; readonly modifierId: string }
+  /** Debug: give or take away an item. */
+  | { readonly type: 'debugItem'; readonly playerId: string; readonly itemId: string }
+  /** Debug: add a second class (as Initiation would). */
+  | { readonly type: 'debugClass'; readonly playerId: string; readonly classId: string }
   /**
    * Take one of the offered rewards (`index`), or none (null). A new ability with every slot full needs
    * `replace`: the slot (1..4) it takes over.
@@ -40,7 +44,8 @@ export type RejectReason =
   | 'invalid_target'
   | 'choose_reward'
   | 'no_reward'
-  | 'slot_needed';
+  | 'slot_needed'
+  | 'cannot_retreat';
 
 /** What happened, in order, for the renderer and UI to animate. */
 export type GameEvent =
@@ -124,5 +129,9 @@ export type GameEvent =
   | { readonly type: 'rewardTaken'; readonly option: RewardOption | null }
   | { readonly type: 'doorsOpened'; readonly doors: readonly DoorOffer[] }
   | { readonly type: 'runEnded'; readonly result: 'won' | 'lost' }
-  | { readonly type: 'debug'; readonly action: DebugAction | 'grant' | 'modifier' }
+  /** Two classes became a hybrid: announce it. */
+  | { readonly type: 'hybridFormed'; readonly unitId: string; readonly hybrid: string }
+  /** A blinded enemy's telegraphed attack went nowhere. */
+  | { readonly type: 'missed'; readonly unitId: string }
+  | { readonly type: 'debug'; readonly action: DebugAction | 'grant' | 'modifier' | 'item' | 'class' }
   | { readonly type: 'rejected'; readonly reason: RejectReason };

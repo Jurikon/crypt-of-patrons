@@ -1,4 +1,4 @@
-import { ACT, getAbility, getClass, getModifier, getPassive, getStatus } from '../content';
+import { ACT, getAbility, getClass, getHybrid, getItem, getModifier, getPassive, getStatus } from '../content';
 import { t, type TextKey } from '../i18n';
 import { cooldownOf, intentCells, type GameState } from '../sim';
 import { abilityName, describeAbility, describeRule } from './describe';
@@ -44,20 +44,7 @@ export function Hud({ view, actions, now }: { view: ViewState; actions: HudActio
         <span class="turn-number">{t('hud.turn', { n: game.combat.turn })}</span>
       </div>
 
-      {p.modifiers.length > 0 && (
-        <div class="mods" data-testid="modifiers">
-          <div class="mods-title">{t('hud.modifiers')}</div>
-          {p.modifiers.map((id) => {
-            const m = getModifier(id);
-            return (
-              <div key={id} class="mod" title={describeRule(m)}>
-                ✦ {t(m.nameKey as TextKey)}
-                <div class="mod-desc">{describeRule(m)}</div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      {!view.topView && (p.modifiers.length > 0 || p.items.length > 0 || p.hybrid) && <BuildPanel player={p} />}
 
       {notice && (
         <div class="notice" data-testid="notice">
@@ -87,8 +74,12 @@ export function Hud({ view, actions, now }: { view: ViewState; actions: HudActio
         <div class="hud" data-testid="hud">
           <div class="hud-vitals">
             <div class="hud-class" title={p.passives.map((id) => describeRule(getPassive(id))).join('. ')}>
-              {t(getClass(p.classId).nameKey as TextKey)} ·{' '}
-              {p.passives.map((id) => t(getPassive(id).nameKey as TextKey)).join(', ')}
+              {p.hybrid ? (
+                <b class="hud-hybrid">{t(getHybrid(p.hybrid).nameKey as TextKey)}</b>
+              ) : (
+                p.classes.map((c) => t(getClass(c).nameKey as TextKey)).join(' + ')
+              )}{' '}
+              · {p.passives.map((id) => t(getPassive(id).nameKey as TextKey)).join(', ')}
             </div>
             <div class="hp" data-testid="hp">
               <span class="hud-label">{t('hud.hp')}</span>
@@ -169,6 +160,38 @@ function RunProgress({ run }: { run: NonNullable<GameState['run']> }) {
       <span class="run-label">
         {run.depth > ACT.rooms ? t('run.boss') : t('run.room', { n: run.depth, total: ACT.rooms })}
       </span>
+    </div>
+  );
+}
+
+/** The build at a glance (GDD 2): classes and hybrid, modifiers, items. Hover a line for what it does. */
+function BuildPanel({ player: p }: { player: GameState['players'][number] }) {
+  return (
+    <div class="mods" data-testid="build">
+      <div class="mods-title">{t('hud.build')}</div>
+      {p.hybrid && (
+        <div class="mod mod-hybrid" title={describeRule(getHybrid(p.hybrid).rule)}>
+          ✶ {t(getHybrid(p.hybrid).nameKey as TextKey)}
+          <div class="mod-desc">{describeRule(getHybrid(p.hybrid).rule)}</div>
+        </div>
+      )}
+      {p.modifiers.map((id) => {
+        const m = getModifier(id);
+        return (
+          <div key={id} class="mod" title={describeRule(m)}>
+            ✦ {t(m.nameKey as TextKey)}
+          </div>
+        );
+      })}
+      {p.items.map((id) => {
+        const it = getItem(id);
+        return (
+          <div key={id} class={it.cursed ? 'mod mod-item cursed' : 'mod mod-item'} title={describeRule(it)}>
+            {it.icon} {t(it.nameKey as TextKey)}
+            {it.cursed && <span class="badge badge-cursed">{t('reward.cursed')}</span>}
+          </div>
+        );
+      })}
     </div>
   );
 }

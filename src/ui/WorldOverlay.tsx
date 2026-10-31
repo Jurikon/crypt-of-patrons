@@ -13,6 +13,8 @@ const DOOR_ICONS: Record<RewardKind, string> = {
   rest: '♥',
   elite: '☠',
   boss: '♛',
+  initiation: '✶',
+  treasure: '◆',
 };
 
 function intentIcon(intent: Intent): string {

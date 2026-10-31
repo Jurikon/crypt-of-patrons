@@ -2,6 +2,7 @@ import { add, dirVec, getCell, rotateDir, type Dir, type Vec2 } from '../core/gr
 import type { AbilityDef } from '../content';
 import { blocksSight, dirTowards } from './engine';
 import { allUnits, isAlly, sideOf, surfaceAt, unitAt, type GameState, type Player, type Unit } from './state';
+import { statOf } from './units';
 
 /**
  * Where an ability can be aimed. Shared by the simulation (validation, default targets), the UI
@@ -50,9 +51,10 @@ export function validTargets(state: GameState, player: Player, ability: AbilityD
       return [me];
     case 'line': {
       const out: Vec2[] = [];
+      const range = t.range + statOf(state, player, 'projectileRange');
       for (const d of searchDirs(player.dir)) {
         let c = me;
-        for (let i = 0; i < t.range; i++) {
+        for (let i = 0; i < range; i++) {
           c = add(c, dirVec(d));
           if (blocksSight(getCell(state.room.grid, c.x, c.y))) break;
           out.push(c);
@@ -81,7 +83,7 @@ export function validTargets(state: GameState, player: Player, ability: AbilityD
         for (let x = player.x - t.range; x <= player.x + t.range; x++) {
           const c = { x, y };
           if (manhattan(c, me) > t.range || getCell(g, x, y) !== 'floor' || unitAt(state, x, y)) continue;
-          if (t.surface && !surfaceAt(state, c, t.surface)) continue;
+          if (t.surface && !t.surface.some((sf) => surfaceAt(state, c, sf))) continue;
           out.push(c);
         }
       return out.sort(byCloseness);

@@ -22,13 +22,18 @@ export function App({ store, labels, actions }: { store: Store<ViewState>; label
     return <StartScreen actions={actions} canContinue={view.canContinue} saveError={view.saveError} />;
   const hit = now - view.hitAt < HIT_FLASH_MS;
   return (
-    <>
+    <div class={view.topView ? 'app top-view' : 'app'}>
       <WorldOverlay store={labels} />
       {hit && <div key={view.hitAt} class="hit-flash" />}
       <Minimap game={view.game} />
       {view.pointerLocked && view.aim && <div class="crosshair" />}
       <Hud view={view} actions={actions} now={now} />
       {now - view.roomAt < 600 && <div key={view.roomAt} class="room-fade" />}
+      {view.hybridNews && now - view.hybridNews.at < 3200 && (
+        <div key={view.hybridNews.at} class="hybrid-news" data-testid="hybrid-news">
+          {t('hybrid.announce', { name: view.hybridNews.name })}
+        </div>
+      )}
       {!view.pointerLocked && !over && !choosing && (
         <div class="prompt" data-testid="click-to-play">
           <div class="prompt-title">{t('prompt.clickToPlay')}</div>
@@ -39,7 +44,7 @@ export function App({ store, labels, actions }: { store: Store<ViewState>; label
       {choosing && <RewardScreen game={view.game} actions={actions} />}
       {over && <ResultScreen game={view.game} elapsedMs={view.elapsedMs} actions={actions} />}
       {view.debugOpen && <DebugOverlay view={view} actions={actions} />}
-    </>
+    </div>
   );
 }
 

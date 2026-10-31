@@ -1,8 +1,20 @@
 import { add, dirVec, getCell, isWalkable, rotateDir, type Vec2 } from '../core/grid';
-import { ABILITIES, ABILITY_SLOTS, ACT, getAbility, MODIFIERS } from '../content';
+import {
+  ABILITIES,
+  ABILITY_SLOTS,
+  ACT,
+  CLASSES,
+  getAbility,
+  getItem,
+  getModifier,
+  getStatus,
+  ITEMS,
+  MODIFIERS,
+} from '../content';
 import { actAllies, advanceEnemies, intentCells } from './ai';
 import { makeEnemy } from './encounter';
 import {
+  addClass,
   chooseReward,
   doorAt,
   effectiveCooldown,
@@ -19,6 +31,7 @@ import {
   dirTowards,
   emit,
   emitTurn,
+  gainRule,
   killUnit,
   moved,
   runEffects,
@@ -28,7 +41,7 @@ import {
 } from './engine';
 import { isPlayer, surfaceAt, unitAt, type Enemy, type GameState, type Player } from './state';
 import { actionDir, validTargets } from './targeting';
-import { checkCombatEnd, cooldownOf, setCooldown, tickCooldowns } from './units';
+import { checkCombatEnd, cooldownOf, setCooldown, statOf, tickCooldowns } from './units';
 
 export interface ApplyResult {
   readonly state: GameState;
@@ -65,6 +78,7 @@ export function apply(prev: GameState, command: Command): ApplyResult {
     case 'move': {
       if (player.hp <= 0) return reject('dead');
       if (state.run?.phase === 'reward') return reject('choose_reward');
+      if (command.dir === 'back' && statOf(state, player, 'noRetreat') > 0) return reject('cannot_retreat');
       const to = add(player, dirVec(rotateDir(player.dir, MOVE_ROTATION[command.dir])));
       const cell = getCell(state.room.grid, to.x, to.y);
       const door = command.dir === 'forward' ? doorAt(state, to.x, to.y) : -1;
@@ -110,7 +124,7 @@ export function apply(prev: GameState, command: Command): ApplyResult {
       break;
     }
     case 'chooseReward': {
-      const r = chooseReward(state, command.index, command.replace, events);
+      const r = chooseReward(eng, command.index, command.replace);
       if (r) return reject(r);
       break;
     }
@@ -149,16 +163,38 @@ export function apply(prev: GameState, command: Command): ApplyResult {
     }
     case 'debugModifier': {
       if (!MODIFIERS.some((m) => m.id === command.modifierId)) return reject('unknown_command');
-      player.modifiers = player.modifiers.includes(command.modifierId)
+      const had = player.modifiers.includes(command.modifierId);
+      player.modifiers = had
         ? player.modifiers.filter((m) => m !== command.modifierId)
         : [...player.modifiers, command.modifierId];
+      if (!had) gainRule(eng, player, getModifier(command.modifierId).onGain);
       events.push({ type: 'debug', action: 'modifier' });
+      break;
+    }
+    case 'debugItem': {
+      if (!ITEMS.some((i) => i.id === command.itemId)) return reject('unknown_command');
+      const had = player.items.includes(command.itemId);
+      player.items = had ? player.items.filter((i) => i !== command.itemId) : [...player.items, command.itemId];
+      if (!had) gainRule(eng, player, getItem(command.itemId).onGain);
+      events.push({ type: 'debug', action: 'item' });
+      break;
+    }
+    case 'debugClass': {
+      if (!CLASSES.some((c) => c.id === command.classId)) return reject('unknown_command');
+      addClass(eng, player, command.classId);
+      events.push({ type: 'debug', action: 'class' });
       break;
     }
     default: {
       const _exhaustive: never = command;
       return reject('unknown_command');
     }
+  }
+  // A new room: rules that act at its start (items), then its first turn.
+  if (events.some((e) => e.type === 'roomEntered') && state.combat.status === 'active') {
+    emit(eng, 'roomStart', { subject: player });
+    emitTurn(eng, 'turnStart');
+    settle(eng);
   }
   // The run moves on when a room's fight ends.
   if (state.run?.phase === 'combat') {
@@ -183,8 +219,12 @@ function useAbility(eng: Engine, player: Player, abilityId: string, target: Vec2
   if (!valid.some((c) => same(c, chosen))) return 'invalid_target';
 
   // +1 because the turn this ability is used on ticks once as the world answers.
-  const cooldown = effectiveCooldown(player, ability.id);
+  // With a blood price (an item), abilities that would cool down cost health instead.
+  const price = statOf(state, player, 'bloodPrice');
+  const cooldown = price > 0 ? 0 : effectiveCooldown(player, ability.id);
   setCooldown(player, ability.id, cooldown > 0 ? cooldown + 1 : 0);
+  if (price > 0 && ability.cooldown > 0) dealDamage(eng, player, price, player, 'effect', []);
+  if (player.hp <= 0) return null;
   const dir = actionDir(player, ability, chosen);
   if (dir !== player.dir) {
     events.push({ type: 'turned', unitId: player.id, from: player.dir, to: dir });
@@ -231,6 +271,11 @@ function worldTurn(eng: Engine): void {
     events.push({ type: 'enemyAttack', unitId: e.id, intent, cells });
     e.intent = null;
     e.strikes++;
+    // Blinded enemies strike at nothing.
+    if (e.statuses.some((st) => getStatus(st.id).blind) && intent.kind !== 'summon') {
+      events.push({ type: 'missed', unitId: e.id });
+      continue;
+    }
     if (intent.kind === 'summon') summonEnemies(eng, e, intent.unit, cells);
     else
       for (const hit of hits)

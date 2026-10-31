@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks';
-import { ABILITY_SLOTS, getAbility, getModifier } from '../content';
+import { ABILITY_SLOTS, getAbility, getClass, getItem, getModifier, getPassive } from '../content';
 import { t, type TextKey } from '../i18n';
 import type { GameState } from '../sim';
 import { abilityName, describeAbility, describeRule } from './describe';
@@ -12,15 +12,45 @@ export interface RewardActions {
 type Option = NonNullable<GameState['run']>['offer'][number];
 
 function title(o: Option): string {
-  if (o.kind === 'ability') return abilityName(getAbility(o.id));
-  if (o.kind === 'modifier') return t(getModifier(o.id).nameKey as TextKey);
-  return `${abilityName(getAbility(o.abilityId))}: ${t(`upgrade.${o.upgrade}` as TextKey)}`;
+  switch (o.kind) {
+    case 'ability':
+      return abilityName(getAbility(o.id));
+    case 'modifier':
+      return t(getModifier(o.id).nameKey as TextKey);
+    case 'item':
+      return `${getItem(o.id).icon ?? ''} ${t(getItem(o.id).nameKey as TextKey)}`;
+    case 'class':
+      return t(getClass(o.id).nameKey as TextKey);
+    case 'upgrade':
+      return `${abilityName(getAbility(o.abilityId))}: ${t(`upgrade.${o.upgrade}` as TextKey)}`;
+  }
 }
 
 function body(o: Option): string {
-  if (o.kind === 'ability') return describeAbility(getAbility(o.id));
-  if (o.kind === 'modifier') return describeRule(getModifier(o.id));
-  return t(`upgrade.${o.upgrade}.desc` as TextKey);
+  switch (o.kind) {
+    case 'ability':
+      return describeAbility(getAbility(o.id));
+    case 'modifier':
+      return describeRule(getModifier(o.id));
+    case 'item':
+      return describeRule(getItem(o.id));
+    case 'class': {
+      const c = getClass(o.id);
+      const passive = c.passives.map(
+        (id) => `${t(getPassive(id).nameKey as TextKey)}: ${describeRule(getPassive(id))}`,
+      );
+      return [...passive, t('reward.classAbilities')].join('. ');
+    }
+    case 'upgrade':
+      return t(`upgrade.${o.upgrade}.desc` as TextKey);
+  }
+}
+
+/** Tags shown on ability cards; a cursed item says so. */
+function badges(o: Option): string[] {
+  if (o.kind === 'ability') return getAbility(o.id).tags.map((tag) => t(`tag.${tag}` as TextKey));
+  if (o.kind === 'item' && getItem(o.id).cursed) return [t('reward.cursed')];
+  return [];
 }
 
 /** Pick 1 of 3 after a cleared room (GDD 1). A new ability with full slots asks which one to replace. */
@@ -68,6 +98,15 @@ export function RewardScreen({ game, actions }: { game: GameState; actions: Rewa
               {i + 1} · {t(`reward.kind.${o.kind}` as TextKey)}
             </div>
             <div class="reward-name">{title(o)}</div>
+            {badges(o).length > 0 && (
+              <div class="reward-badges">
+                {badges(o).map((b) => (
+                  <span key={b} class={o.kind === 'item' ? 'badge badge-cursed' : 'badge'}>
+                    {b}
+                  </span>
+                ))}
+              </div>
+            )}
             <div class="reward-desc">{body(o)}</div>
           </button>
         ))}

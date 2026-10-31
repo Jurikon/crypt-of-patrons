@@ -52,6 +52,9 @@ export class CameraRig {
   private topStart = 0;
   private topValue = 0;
   private topPose = { pos: new THREE.Vector3(), quat: new THREE.Quaternion() };
+  private margins = { top: 0.1, bottom: 0.05 };
+  /** The next turn of the player is instant (it came from the mouse, which already shows the new view). */
+  private instantTurn = false;
 
   constructor(
     readonly camera: THREE.PerspectiveCamera,
@@ -66,17 +69,24 @@ export class CameraRig {
     this.setRoom(room);
   }
 
-  /** Recomputes the overhead pose so the whole room fits the view. */
-  setRoom(room: Room): void {
+  /**
+   * Recomputes the overhead pose so the whole room fits the part of the screen the HUD leaves free:
+   * `top` and `bottom` are the covered fractions of the screen height (progress bar, door labels).
+   */
+  setRoom(room: Room, margins: { top: number; bottom: number } = this.margins): void {
+    this.margins = margins;
     const w = room.grid.w * CELL;
     const h = room.grid.h * CELL;
     const center = new THREE.Vector3(w / 2, 0, h / 2);
     const vFov = THREE.MathUtils.degToRad(this.camera.fov);
     const hFov = 2 * Math.atan(Math.tan(vFov / 2) * this.camera.aspect);
-    const fitH = h / 2 / Math.tan(vFov / 2);
+    const free = Math.max(0.4, 1 - margins.top - margins.bottom);
+    const fitH = h / 2 / Math.tan(vFov / 2) / free;
     const fitW = w / 2 / Math.tan(hFov / 2);
     const height = Math.max(fitH, fitW) * 1.08 + 1;
-    this.topPose.pos.set(center.x, height, center.z);
+    // Shift north so the room sits in the middle of the free band, not of the whole screen.
+    const shift = (margins.top - margins.bottom) * height * Math.tan(vFov / 2);
+    this.topPose.pos.set(center.x, height, center.z - shift);
     // Look straight down with north at the top of the screen, like the minimap.
     this.topPose.quat.setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0, 'YXZ'));
   }
@@ -111,7 +121,13 @@ export class CameraRig {
         // Abilities can turn the player by 180° (teleport behind, aiming backwards).
         const quarters = (e.to - e.from + 4) % 4;
         const delta = quarters === 1 ? -Math.PI / 2 : quarters === 3 ? Math.PI / 2 : quarters === 2 ? Math.PI : 0;
-        this.yaw = { from: this.currentYaw(now), to: this.yaw.to + delta, start: now, duration: TURN_MS };
+        if (this.instantTurn) {
+          // A mouse turn: the body snaps round and the look offset already moved the other way.
+          this.instantTurn = false;
+          const to = this.yaw.to + delta;
+          this.yaw = { from: to, to, start: now, duration: 0 };
+          this.lookYaw -= delta;
+        } else this.yaw = { from: this.currentYaw(now), to: this.yaw.to + delta, start: now, duration: TURN_MS };
         break;
       }
       case 'bumped':
@@ -131,6 +147,21 @@ export class CameraRig {
       default:
         break;
     }
+  }
+
+  /**
+   * How far the mouse look has drifted from where the body faces: −1 = past 45° right, +1 = past 45° left,
+   * 0 = within 45°. The controller turns the body then (decision 2 of M4: view and facing never split).
+   */
+  lookTurn(): -1 | 0 | 1 {
+    if (this.lookYaw > Math.PI / 4) return 1;
+    if (this.lookYaw < -Math.PI / 4) return -1;
+    return 0;
+  }
+
+  /** The next player turn comes from the mouse: apply it instantly and keep the view where it is. */
+  expectMouseTurn(): void {
+    this.instantTurn = true;
   }
 
   look(dx: number, dy: number): void {

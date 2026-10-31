@@ -1,18 +1,25 @@
-import { getModifier, getPassive, getStatus, type StatId } from '../content';
+import { getHybrid, getItem, getModifier, getPassive, getStatus, type RuleDef, type StatId } from '../content';
 import type { GameEvent } from './commands';
 import { isPlayer, type GameState, type Player, type Unit } from './state';
 
-/** Sum of a stat over a unit's rules (players: passives and modifiers) and its current statuses. */
+/** Every rule a player carries, in a fixed order: passives, modifiers, items, the hybrid's feature. */
+export function playerRules(p: Player): RuleDef[] {
+  return [
+    ...p.passives.map((id) => getPassive(id)),
+    ...p.modifiers.map((id) => getModifier(id)),
+    ...p.items.map((id) => getItem(id)),
+    ...(p.hybrid ? [getHybrid(p.hybrid).rule] : []),
+  ];
+}
+
+/** Sum of a stat over a unit's rules (players: passives, modifiers, items, hybrid) and its current statuses. */
 export function statOf(state: GameState, unit: Unit | undefined, stat: StatId): number {
   if (!unit) return 0;
   let total = 0;
   const add = (mods: readonly { stat: StatId; add: number }[]) => {
     for (const m of mods) if (m.stat === stat) total += m.add;
   };
-  if (isPlayer(state, unit)) {
-    for (const id of unit.passives) add(getPassive(id).stats);
-    for (const id of unit.modifiers) add(getModifier(id).stats);
-  }
+  if (isPlayer(state, unit)) for (const r of playerRules(unit)) add(r.stats);
   for (const s of unit.statuses) add(getStatus(s.id).stats);
   return total;
 }

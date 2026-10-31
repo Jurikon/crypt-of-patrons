@@ -20,10 +20,19 @@ const name = (key: string) => t(key as TextKey);
 
 function who(sel: UnitSelector | undefined): string {
   if (!sel || sel.kind === 'target' || sel.kind === 'subject') return '';
-  if (sel.kind === 'self' || sel.kind === 'actor') return t('desc.toSelf');
-  if (sel.radius === 1) return t(sel.filter === 'foes' ? 'desc.adjacentFoes' : 'desc.adjacent');
+  if (sel.kind === 'self') return t('desc.toSelf');
+  if (sel.kind === 'actor') return t('desc.toActor');
+  if (sel.kind === 'frontRow') return t('desc.frontRow');
+  if (sel.kind === 'beyond') return t('desc.beyond');
+  if (sel.kind === 'nearest') return t('desc.nearestFoe');
+  if (sel.radius >= 50) return t('desc.allFoes');
+  if (sel.filter === 'allies') return t('desc.alliesAround');
+  if (sel.radius === 1 && !sel.square) return t(sel.filter === 'foes' ? 'desc.adjacentFoes' : 'desc.adjacent');
+  if (sel.square) return t('desc.square', { n: sel.radius * 2 + 1 });
   return t(sel.filter === 'foes' ? 'desc.foesInRadius' : 'desc.inRadius', { n: sel.radius });
 }
+
+const surfaceNames = (ids: readonly string[]) => ids.map((id) => name(getSurface(id).nameKey)).join(t('desc.or'));
 
 function withWho(text: string, sel: UnitSelector | undefined): string {
   const w = who(sel);
@@ -49,13 +58,26 @@ export function describeEffect(e: EffectSpec): string {
     case 'shield':
       return withWho(t('effect.shield', { n: e.amount, turns: e.turns }), e.to);
     case 'surface':
-      return t('effect.surface', { surface: name(getSurface(e.surface).nameKey) });
+      return e.radius
+        ? t('effect.surfaceArea', {
+            surface: name(getSurface(e.surface).nameKey),
+            n: e.radius * 2 + 1,
+            turns: e.turns ?? 0,
+          })
+        : t('effect.surface', { surface: name(getSurface(e.surface).nameKey) });
     case 'clearSurface':
       return t('effect.clearSurface', { surface: name(getSurface(e.surface).nameKey) });
     case 'summon':
+      if (e.at === 'frontRow') return t('effect.summonRow', { unit: name(getSummon(e.unit).nameKey) });
       return e.consumes
-        ? t('effect.summonFrom', { unit: name(getSummon(e.unit).nameKey), from: name(getSurface(e.consumes).nameKey) })
+        ? t('effect.summonFrom', { unit: name(getSummon(e.unit).nameKey), from: surfaceNames(e.consumes) })
         : t('effect.summon', { unit: name(getSummon(e.unit).nameKey) });
+    case 'removeStatus':
+      return t('effect.removeStatus', { status: name(getStatus(e.status).nameKey) });
+    case 'cooldowns':
+      return t('effect.cooldowns', { n: -e.delta });
+    case 'maxHp':
+      return e.set !== undefined ? t('effect.maxHpSet', { n: e.set }) : t('effect.maxHpAdd', { n: e.add ?? 0 });
     case 'heal':
       return withWho(t('effect.heal', { n: e.amount }), e.to);
     case 'freeAction':
@@ -76,7 +98,7 @@ function describeTarget(target: TargetSpec): string {
       return t(`target.unit.${target.filter}` as TextKey, { n: target.range });
     case 'cell':
       return target.surface
-        ? t('target.surface', { n: target.range, surface: name(getSurface(target.surface).nameKey) })
+        ? t('target.surface', { n: target.range, surface: surfaceNames(target.surface) })
         : t('target.cell', { n: target.range });
   }
 }
@@ -101,12 +123,17 @@ function describeTrigger(tr: TriggerDef): string {
   if (when === key) when = t(`when.${tr.on}` as TextKey);
   if (tr.tags?.length) when += ` (${tr.tags.map((tag) => t(`tag.${tag}` as TextKey)).join(', ')})`;
   if (tr.subjectStatus) when += ` ${t('desc.withStatus', { status: name(getStatus(tr.subjectStatus).nameKey) })}`;
+  if (tr.backstab) when += ` ${t('desc.fromBehind')}`;
+  if (tr.near !== undefined) when += ` ${t('desc.near', { n: tr.near })}`;
+  if (tr.ownerHpAtMost !== undefined) when += ` ${t('desc.lowHp', { n: tr.ownerHpAtMost })}`;
+  if (tr.oncePerRoom) when += ` ${t('desc.oncePerRoom')}`;
   return `${when}: ${tr.effects.map(describeEffect).join(', ')}`;
 }
 
-/** Passive or modifier: its stat changes and triggers, in words. */
+/** Passive, modifier, item or hybrid feature: what it does when gained, its stats and triggers, in words. */
 export function describeRule(r: RuleDef): string {
   const parts = [
+    ...(r.onGain ?? []).map((e) => capital(describeEffect(e))),
     ...r.stats.map((s) => t(`stat.${s.stat}` as TextKey, { n: s.add, x: s.add + 1 })),
     ...r.triggers.map(describeTrigger),
   ];

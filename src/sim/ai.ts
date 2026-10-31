@@ -1,6 +1,8 @@
 import { add, dirVec, getCell, index, rotateDir, DIRS, type Dir, type Vec2 } from '../core/grid';
-import { getEnemy, getStatus, getSummon, type AttackSpec } from '../content';
-import { dealDamage, moved, settle, type Engine } from './engine';
+import { getAbility, getEnemy, getStatus, getSummon, type AttackSpec } from '../content';
+import { dealDamage, moved, ownerPlayer, runEffects, settle, type Engine } from './engine';
+import { upgradedEffects } from './run';
+import { statOf } from './units';
 import { surfaceAt, unitAt, unitById, type Ally, type Enemy, type GameState, type Intent, type Unit } from './state';
 
 /**
@@ -123,6 +125,7 @@ function nearestPlayer(state: GameState, from: Vec2): Unit | undefined {
 }
 
 const isStunned = (u: Unit) => u.statuses.some((s) => getStatus(s.id).stun);
+const isRooted = (u: Unit) => u.statuses.some((s) => getStatus(s.id).rooted);
 
 /**
  * Who an enemy goes after: whoever taunted it, else the nearest player or summon (players win ties,
@@ -375,7 +378,7 @@ export function actAllies(eng: Engine): void {
   const { state, events } = eng;
   for (const id of state.allies.map((a) => a.id)) {
     const a = state.allies.find((x) => x.id === id);
-    if (!a || isStunned(a) || state.combat.status !== 'active') continue;
+    if (!a || isStunned(a) || getSummon(a.type).inert || state.combat.status !== 'active') continue;
     const adjacent = state.enemies.find((e) => manhattan(e, a) === 1);
     if (adjacent) {
       const face = dirTowards(a, adjacent);
@@ -384,7 +387,23 @@ export function actAllies(eng: Engine): void {
         a.dir = face;
       }
       events.push({ type: 'allyAttack', unitId: a.id, target: { x: adjacent.x, y: adjacent.y } });
-      dealDamage(eng, adjacent, getSummon(a.type).damage, a, 'attack', ['melee']);
+      const owner = ownerPlayer(state, a);
+      const target = { x: adjacent.x, y: adjacent.y };
+      const base = owner?.abilities[0];
+      if (owner && base && statOf(state, owner, 'summonsUseBaseAttack') > 0) {
+        // The lich's crown: summons strike with their owner's base attack.
+        runEffects(eng, upgradedEffects(owner, base), {
+          source: a,
+          target,
+          dir: face,
+          tags: getAbility(base).tags,
+          event: null,
+        });
+      } else {
+        // A war banner: summons next to their owner hit harder.
+        const aura = owner && manhattan(owner, a) <= 1 ? statOf(state, owner, 'auraDamage') : 0;
+        dealDamage(eng, adjacent, getSummon(a.type).damage + aura, a, 'attack', ['melee']);
+      }
       settle(eng);
       continue;
     }
@@ -401,6 +420,13 @@ export function advanceEnemies(eng: Engine): void {
     if (!e || livingPlayers(state).length === 0 || state.combat.status !== 'active') continue;
     if (isStunned(e)) {
       e.moved = false;
+      continue;
+    }
+    if (isRooted(e)) {
+      // Dazed: it cannot move or turn, but telegraphs a blow straight ahead.
+      e.moved = false;
+      e.intent = intentFor(state, e, e.dir);
+      events.push({ type: 'intentDeclared', unitId: e.id, intent: e.intent });
       continue;
     }
     const p = plan(state, e);

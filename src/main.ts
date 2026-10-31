@@ -1,11 +1,11 @@
 import { h, render } from 'preact';
 import './style.css';
 import { formatHash, parseHash, randomSeed } from './debug/url';
-import { detectLang, setLang, t } from './i18n';
+import { detectLang, setLang, t, type TextKey } from './i18n';
 import { attachInput } from './input/input';
 import { GameRenderer, type Quality } from './render/renderer';
 import type { Vec2 } from './core/grid';
-import { CLASSES, getAbility } from './content';
+import { CLASSES, getAbility, getHybrid } from './content';
 import {
   apply,
   createGame,
@@ -117,6 +117,7 @@ const store = createStore<ViewState>({
   saveError: savedText !== null && saved === null,
   elapsedMs: 0,
   roomAt: -1e9,
+  hybridNews: null,
 });
 if (params.seed !== null) writeHash();
 
@@ -211,6 +212,9 @@ function run(command: Command, now: number): void {
     store.set({ roomAt: now });
   } else renderer.play(result.events, state);
   persist();
+  const formed = result.events.find((e) => e.type === 'hybridFormed');
+  if (formed?.type === 'hybridFormed')
+    store.set({ hybridNews: { name: t(getHybrid(formed.hybrid).nameKey as TextKey), at: now } });
   if (state.run?.phase === 'reward' && document.pointerLockElement) document.exitPointerLock();
   if (command.type === 'useAbility') selected = null;
   // Keep showing the old health until the hit is actually animated.
@@ -334,6 +338,8 @@ const actions: AppActions = {
   grantAbility: (abilityId: string, slot: number) =>
     dispatch({ type: 'debugGrant', playerId: PLAYER_ID, abilityId, slot }),
   toggleModifier: (modifierId: string) => dispatch({ type: 'debugModifier', playerId: PLAYER_ID, modifierId }),
+  toggleItem: (itemId: string) => dispatch({ type: 'debugItem', playerId: PLAYER_ID, itemId }),
+  addClass: (id: string) => dispatch({ type: 'debugClass', playerId: PLAYER_ID, classId: id }),
   toggleQuality: () => {
     const quality: Quality = store.get().quality === 'high' ? 'low' : 'high';
     renderer.setQuality(quality);
@@ -377,6 +383,12 @@ attachInput(
     look: (dx, dy) => {
       renderer.look(dx, dy);
       aimManual = false;
+      // Looking past 45° turns the hero (free, like Q/E): the view and the facing never split.
+      const turn = renderer.lookTurn();
+      if (turn !== 0 && !renderer.isBusy(performance.now()) && store.get().screen === 'play' && player()?.hp) {
+        renderer.expectMouseTurn();
+        dispatch({ type: 'turn', playerId: PLAYER_ID, dir: turn > 0 ? 'left' : 'right' });
+      }
     },
     cycleTarget,
     pointer: (x, y) => {

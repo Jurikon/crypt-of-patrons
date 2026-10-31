@@ -1,8 +1,6 @@
 import { add, dirVec, getCell, type CellType, type Dir, type Vec2 } from '../core/grid';
 import {
   getEnemy,
-  getModifier,
-  getPassive,
   getStatus,
   getSummon,
   getSurface,
@@ -34,7 +32,7 @@ import {
   type Surface,
   type Unit,
 } from './state';
-import { checkCombatEnd, statOf } from './units';
+import { checkCombatEnd, playerRules, statOf } from './units';
 
 /**
  * The effect engine (CLAUDE.md rule 5): a small set of primitives, plus triggers that react to engine
@@ -64,6 +62,10 @@ export interface TriggerEvent {
   readonly tags: readonly Tag[];
   /** The subject's statuses at that moment. */
   readonly subjectStatuses: readonly string[];
+  /** Where the actor stood (for blows that go through the subject). */
+  readonly actorCell: Vec2 | null;
+  /** A hit from behind. */
+  readonly backstab: boolean;
   readonly depth: number;
 }
 
@@ -99,6 +101,7 @@ const isActive = (state: GameState) => state.combat.status === 'active';
 const blocksPush = (t: CellType) => t === 'wall' || t === 'pillar' || t === 'door';
 export const blocksSight = (t: CellType) => t === 'wall' || t === 'pillar' || t === 'door';
 const manhattan = (a: Vec2, b: Vec2) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+const chebyshev = (a: Vec2, b: Vec2) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
 const same = (a: Vec2, b: Vec2) => a.x === b.x && a.y === b.y;
 const pos = (u: Unit): Vec2 => ({ x: u.x, y: u.y });
 
@@ -129,7 +132,14 @@ export function ownerPlayer(state: GameState, u: Unit): Player | undefined {
 export function emit(
   eng: Engine,
   on: TriggerOn,
-  e: { actor?: Unit | null; subject?: Unit | null; cell?: Vec2 | null; from?: Vec2 | null; tags?: readonly Tag[] },
+  e: {
+    actor?: Unit | null;
+    subject?: Unit | null;
+    cell?: Vec2 | null;
+    from?: Vec2 | null;
+    tags?: readonly Tag[];
+    backstab?: boolean;
+  },
 ): void {
   const { state } = eng;
   eng.queue.push({
@@ -140,6 +150,8 @@ export function emit(
     from: e.from ?? null,
     tags: e.tags ?? [],
     subjectStatuses: e.subject ? e.subject.statuses.map((s) => s.id) : [],
+    actorCell: e.actor ? pos(e.actor) : null,
+    backstab: e.backstab ?? false,
     depth: eng.depth,
   });
 }
@@ -156,7 +168,23 @@ function fromBehind(attacker: Vec2, unit: Unit): boolean {
   return dot < 0 && Math.abs(cross) < Math.abs(dot);
 }
 
-/** Damage after vulnerability, backstab and shields. Queues `damaged`, `hit` and, on death, `kill`/`death`. */
+/** True when `attacker` stands in front of `unit` (within the 90° cone it faces, edges included). */
+function fromFront(attacker: Vec2, unit: Unit): boolean {
+  const f = dirVec(unit.dir);
+  const dx = attacker.x - unit.x;
+  const dy = attacker.y - unit.y;
+  const dot = dx * f.x + dy * f.y;
+  const cross = dx * f.y - dy * f.x;
+  return dot > 0 && Math.abs(cross) <= dot;
+}
+
+const hasFlag = (u: Unit, flag: 'frontGuard' | 'blind' | 'rooted' | 'stun') =>
+  u.statuses.some((s) => getStatus(s.id)[flag] === true);
+
+/**
+ * Damage after the attacker's bonuses, vulnerability, backstab, guards and shields.
+ * Queues `damaged`, `hit` and, on death, `kill`/`death`.
+ */
 export function dealDamage(
   eng: Engine,
   unit: Unit,
@@ -169,14 +197,16 @@ export function dealDamage(
   if (!isAlive(state, unit)) return;
   let dmg = Math.max(0, amount);
   let backstab = false;
+  const attack = cause === 'attack' && source !== null && source !== unit;
+  if (attack && dmg > 0) dmg += statOf(state, source, 'damageDealt');
   if (dmg > 0) dmg += statOf(state, unit, 'damageTaken');
-  if (dmg > 0 && cause === 'attack' && source && source !== unit) {
-    const extra = statOf(state, source, 'backstab');
-    if (extra > 0 && fromBehind(source, unit)) {
-      dmg *= 1 + extra;
-      backstab = true;
-    }
+  if (attack && dmg > 0 && fromBehind(source, unit)) {
+    backstab = true;
+    dmg *= 1 + statOf(state, source, 'backstab');
   }
+  if (attack && dmg > 0) dmg = Math.floor(dmg * (1 + statOf(state, source, 'damageFactor')));
+  // A raised guard stops projectiles coming from the front.
+  if (source && tags.includes('projectile') && hasFlag(unit, 'frontGuard') && fromFront(source, unit)) dmg = 0;
   if (isPlayer(state, unit) && unit.god) dmg = 0;
   let absorbed = 0;
   for (const s of unit.statuses) {
@@ -188,9 +218,10 @@ export function dealDamage(
   }
   for (const s of unit.statuses.filter((x) => getStatus(x.id).shield && x.amount <= 0)) removeStatus(eng, unit, s.id);
   unit.hp = Math.max(0, unit.hp - dmg);
-  events.push({ type: 'damaged', unitId: unit.id, amount: dmg, absorbed, hp: unit.hp, cause, backstab });
+  const shownBackstab = backstab && statOf(state, source ?? undefined, 'backstab') > 0;
+  events.push({ type: 'damaged', unitId: unit.id, amount: dmg, absorbed, hp: unit.hp, cause, backstab: shownBackstab });
   emit(eng, 'damaged', { actor: source, subject: unit, tags });
-  if (source && cause === 'attack') emit(eng, 'hit', { actor: source, subject: unit, tags });
+  if (source && cause === 'attack') emit(eng, 'hit', { actor: source, subject: unit, tags, backstab });
   if (unit.hp <= 0) killUnit(eng, unit, source, tags);
 }
 
@@ -201,11 +232,29 @@ export function killUnit(eng: Engine, unit: Unit, killer: Unit | null, tags: rea
   const ref = refOf(state, unit);
   const statuses = unit.statuses.map((s) => s.id);
   const cell = pos(unit);
+  const side = sideOf(state, unit);
+  const carried = unit.statuses.filter((s) => getStatus(s.id).jumps);
   unit.hp = 0;
   events.push({ type: 'died', unitId: unit.id });
   if (isEnemy(state, unit)) state.enemies.splice(state.enemies.indexOf(unit), 1);
   if (isAlly(state, unit)) state.allies.splice(state.allies.indexOf(unit), 1);
-  const base = { cell, from: null, tags, subjectStatuses: statuses, depth: eng.depth, subject: ref };
+  // Jumping statuses (curses) move on to the nearest unit of the same side.
+  for (const st of carried) {
+    const next = allUnits(state)
+      .filter((u) => u !== unit && sideOf(state, u) === side && !isPlayer(state, u))
+      .sort((a, b) => manhattan(a, cell) - manhattan(b, cell))[0];
+    if (next) applyStatus(eng, next, st.id, st.turns, st.amount, st.sourceId ?? unit.id);
+  }
+  const base = {
+    cell,
+    from: null,
+    tags,
+    subjectStatuses: statuses,
+    depth: eng.depth,
+    subject: ref,
+    actorCell: killer ? pos(killer) : null,
+    backstab: false,
+  };
   if (killer && killer !== unit) eng.queue.push({ ...base, on: 'kill', actor: refOf(state, killer) });
   eng.queue.push({ ...base, on: 'death', actor: killer ? refOf(state, killer) : null });
   checkCombatEnd(state, events);
@@ -232,7 +281,9 @@ export function push(
   const factor = isEnemy(state, unit) ? (getEnemy(unit.type).pushFactor ?? 1) : 1;
   const total = Math.floor(raw * factor);
   const collisionDamage = PUSH_COLLISION_DAMAGE + statOf(state, source ?? undefined, 'pushCollisionBonus');
-  for (let i = 0; i < total; i++) {
+  if (total > 0) emit(eng, 'pushed', { actor: source, subject: unit, from: pos(unit), tags });
+  let steps = total;
+  for (let i = 0; i < steps; i++) {
     if (!isAlive(state, unit)) return;
     const from = pos(unit);
     const to = add(from, step);
@@ -240,6 +291,7 @@ export function push(
     if (blocksPush(cell)) {
       events.push({ type: 'collided', unitId: unit.id, at: to, withId: null });
       dealDamage(eng, unit, collisionDamage, source, 'collision', tags);
+      emit(eng, 'collide', { actor: source, subject: unit, tags });
       return;
     }
     const other = unitAt(state, to.x, to.y);
@@ -247,12 +299,15 @@ export function push(
       events.push({ type: 'collided', unitId: unit.id, at: to, withId: other.id });
       dealDamage(eng, unit, collisionDamage, source, 'collision', tags);
       dealDamage(eng, other, PUSH_COLLISION_DAMAGE, source, 'collision', tags);
+      emit(eng, 'collide', { actor: source, subject: unit, tags });
       return;
     }
     unit.x = to.x;
     unit.y = to.y;
     events.push({ type: 'pushed', unitId: unit.id, from, to });
     emit(eng, 'enterCell', { actor: source, subject: unit, tags });
+    // Ice: a pushed unit slides one cell further.
+    if (surfaceAt(state, to, 'ice') && steps < total + 3) steps++;
     if (cell === 'pit') {
       events.push({ type: 'fell', unitId: unit.id, at: to });
       killUnit(eng, unit, source, tags);
@@ -275,7 +330,7 @@ export function applyStatus(eng: Engine, unit: Unit, id: string, turns: number, 
   const inst = {
     id,
     turns: Math.max(turns, old?.turns ?? 0),
-    amount: Math.max(amount, old?.amount ?? 0),
+    amount: def.stacks ? (old?.amount ?? 0) + amount : Math.max(amount, old?.amount ?? 0),
     sourceId,
   };
   unit.statuses = [...unit.statuses.filter((s) => s.id !== id), inst];
@@ -327,6 +382,12 @@ function centerOf(ctx: EffectContext, c: 'target' | 'self' | 'subject'): Vec2 | 
   return ctx.event?.cell ?? null;
 }
 
+/** The cell in front of the actor and the two beside it. */
+function frontRow(ctx: EffectContext): Vec2[] {
+  const front = add(pos(ctx.source), dirVec(ctx.dir));
+  return [front, add(front, dirVec(((ctx.dir + 1) % 4) as Dir)), add(front, dirVec(((ctx.dir + 3) % 4) as Dir))];
+}
+
 function selectUnits(eng: Engine, sel: UnitSelector | undefined, ctx: EffectContext): Unit[] {
   const { state } = eng;
   const s = sel ?? { kind: 'target' };
@@ -350,14 +411,51 @@ function selectUnits(eng: Engine, sel: UnitSelector | undefined, ctx: EffectCont
     case 'around': {
       const c = centerOf(ctx, s.center);
       if (!c) return [];
+      const dist = s.square ? chebyshev : manhattan;
       return allUnits(state).filter(
-        (u) => manhattan(u, c) <= s.radius && (s.includeCenter || !same(u, c)) && keeps(state, s.filter, ctx.source, u),
+        (u) => dist(u, c) <= s.radius && (s.includeCenter || !same(u, c)) && keeps(state, s.filter, ctx.source, u),
       );
+    }
+    case 'frontRow':
+      return frontRow(ctx)
+        .map((c) => unitAt(state, c.x, c.y))
+        .filter((u): u is Unit => !!u && u !== ctx.source);
+    case 'nearest': {
+      const c = centerOf(ctx, s.center);
+      if (!c) return [];
+      const skip = ctx.event?.subject?.id;
+      const best = allUnits(state)
+        .filter((u) => !same(u, c) && u.id !== skip && keeps(state, s.filter, ctx.source, u))
+        .sort((a, b) => manhattan(a, c) - manhattan(b, c))[0];
+      return best ? [best] : [];
+    }
+    case 'beyond': {
+      // Past the subject as seen from the actor (triggers), or past the target along the action.
+      const from = ctx.event?.actorCell ?? pos(ctx.source);
+      const at = ctx.event?.cell ?? ctx.target;
+      const cell = add(at, dirVec(same(from, at) ? ctx.dir : dirTowards(from, at)));
+      const u = unitAt(state, cell.x, cell.y);
+      return u && u !== ctx.source ? [u] : [];
     }
   }
 }
 
-function selectCell(ctx: EffectContext, at: CellSelector): Vec2 | null {
+function selectCell(eng: Engine, ctx: EffectContext, at: CellSelector): Vec2 | null {
+  if (typeof at === 'object') {
+    // The nearest free floor cell around a point (with one of the surfaces, if asked).
+    const c = centerOf(ctx, at.near);
+    if (!c) return null;
+    const g = eng.state.room.grid;
+    let best: Vec2 | null = null;
+    for (let y = c.y - at.radius; y <= c.y + at.radius; y++)
+      for (let x = c.x - at.radius; x <= c.x + at.radius; x++) {
+        const p = { x, y };
+        if (manhattan(p, c) > at.radius || getCell(g, x, y) !== 'floor' || unitAt(eng.state, x, y)) continue;
+        if (at.surface && !at.surface.some((sf) => surfaceAt(eng.state, p, sf))) continue;
+        if (!best || manhattan(p, c) < manhattan(best, c)) best = p;
+      }
+    return best;
+  }
   switch (at) {
     case 'target':
       return ctx.target;
@@ -383,7 +481,8 @@ function areaCells(
   for (let dy = -sel.radius; dy <= sel.radius; dy++)
     for (let dx = -sel.radius; dx <= sel.radius; dx++) {
       const p = { x: c.x + dx, y: c.y + dy };
-      if (manhattan(p, c) > sel.radius || (!sel.includeCenter && dx === 0 && dy === 0)) continue;
+      if ((sel.square ? chebyshev : manhattan)(p, c) > sel.radius || (!sel.includeCenter && dx === 0 && dy === 0))
+        continue;
       if (!blocksSight(getCell(eng.state.room.grid, p.x, p.y))) cells.push(p);
     }
   return { center: c, cells };
@@ -402,8 +501,10 @@ export function runEffects(eng: Engine, effects: readonly EffectSpec[], context:
       case 'damage': {
         const area = areaCells(eng, effect.to, ctx);
         if (area) events.push({ type: 'area', center: area.center, cells: area.cells });
-        for (const u of selectUnits(eng, effect.to, ctx))
-          dealDamage(eng, u, effect.amount, ctx.source, cause, ctx.tags);
+        for (const u of selectUnits(eng, effect.to, ctx)) {
+          const stacked = effect.fromStatus ? (u.statuses.find((x) => x.id === effect.fromStatus)?.amount ?? 0) : 0;
+          dealDamage(eng, u, effect.amount + stacked, ctx.source, cause, ctx.tags);
+        }
         break;
       }
       case 'push': {
@@ -472,7 +573,8 @@ export function runEffects(eng: Engine, effects: readonly EffectSpec[], context:
         const start = pos(ctx.source);
         let last = start;
         const hits: Vec2[] = [];
-        for (let i = 0; i < effect.range; i++) {
+        const range = effect.range + statOf(state, ctx.source, 'projectileRange');
+        for (let i = 0; i < range; i++) {
           const next = add(last, step);
           if (blocksSight(getCell(state.room.grid, next.x, next.y))) break;
           last = next;
@@ -497,49 +599,64 @@ export function runEffects(eng: Engine, effects: readonly EffectSpec[], context:
         break;
       }
       case 'surface': {
-        const cell = selectCell(ctx, effect.at);
-        if (cell) addSurface(eng, effect.surface, cell, effect.turns ?? null, sideOf(state, ctx.source));
+        const cell = selectCell(eng, ctx, effect.at);
+        if (!cell) break;
+        const r = effect.radius ?? 0;
+        for (let dy = -r; dy <= r; dy++)
+          for (let dx = -r; dx <= r; dx++)
+            addSurface(
+              eng,
+              effect.surface,
+              { x: cell.x + dx, y: cell.y + dy },
+              effect.turns ?? null,
+              sideOf(state, ctx.source),
+            );
         break;
       }
       case 'clearSurface': {
-        const cell = selectCell(ctx, effect.at);
+        const cell = selectCell(eng, ctx, effect.at);
         if (cell) removeSurface(eng, effect.surface, cell);
         break;
       }
       case 'summon': {
-        const cell = selectCell(ctx, effect.at);
         const owner = ownerPlayer(state, ctx.source);
-        if (!cell || !owner || getCell(state.room.grid, cell.x, cell.y) !== 'floor' || unitAt(state, cell.x, cell.y))
-          break;
-        if (effect.consumes) {
-          if (!surfaceAt(state, cell, effect.consumes)) break;
-          removeSurface(eng, effect.consumes, cell);
+        if (!owner) break;
+        const cells = effect.at === 'frontRow' ? frontRow(ctx) : [selectCell(eng, ctx, effect.at)];
+        const free = (c: Vec2 | null): c is Vec2 =>
+          !!c && getCell(state.room.grid, c.x, c.y) === 'floor' && !unitAt(state, c.x, c.y);
+        let placed: Vec2 | null = null;
+        for (const cell of cells) {
+          if (!free(cell)) continue;
+          if (effect.consumes) {
+            const sf = effect.consumes.find((id) => surfaceAt(state, cell, id));
+            if (!sf) continue;
+            removeSurface(eng, sf, cell);
+          }
+          summonAlly(eng, effect.unit, owner, cell, ctx);
+          placed ??= cell;
         }
-        const def = getSummon(effect.unit);
-        const ally = {
-          id: `s${state.nextId++}`,
-          type: def.id,
-          owner: owner.id,
-          x: cell.x,
-          y: cell.y,
-          dir: ctx.source.dir,
-          hp: def.maxHp,
-          maxHp: def.maxHp,
-          statuses: [],
-        };
-        state.allies.push(ally);
-        events.push({
-          type: 'summoned',
-          unitId: ally.id,
-          summon: def.id,
-          side: 'heroes',
-          owner: owner.id,
-          at: { x: cell.x, y: cell.y },
-          dir: ally.dir,
-          hp: ally.hp,
-        });
-        emit(eng, 'summon', { actor: ctx.source, subject: ally, tags: ctx.tags });
-        emit(eng, 'enterCell', { actor: ctx.source, subject: ally, tags: ctx.tags });
+        // Extra summons rise on the nearest free cells.
+        for (let i = 0; placed && i < statOf(state, owner, 'extraSummons'); i++) {
+          const near = selectCell(eng, { ...ctx, target: placed }, { near: 'target', radius: 2 });
+          if (near) summonAlly(eng, effect.unit, owner, near, ctx);
+        }
+        break;
+      }
+      case 'removeStatus':
+        for (const u of selectUnits(eng, effect.to, ctx)) removeStatus(eng, u, effect.status);
+        break;
+      case 'cooldowns': {
+        const p = ownerPlayer(state, ctx.source);
+        if (!p) break;
+        for (const c of p.cooldowns) c.turns += effect.delta;
+        p.cooldowns = p.cooldowns.filter((c) => c.turns > 0);
+        break;
+      }
+      case 'maxHp': {
+        const p = ownerPlayer(state, ctx.source);
+        if (!p) break;
+        p.maxHp = Math.max(1, effect.set ?? p.maxHp + (effect.add ?? 0));
+        p.hp = Math.min(p.hp, p.maxHp);
         break;
       }
       case 'heal':
@@ -566,6 +683,41 @@ export function runEffects(eng: Engine, effects: readonly EffectSpec[], context:
   }
 }
 
+function summonAlly(eng: Engine, unit: string, owner: Player, cell: Vec2, ctx: EffectContext): void {
+  const { state, events } = eng;
+  const def = getSummon(unit);
+  const ally = {
+    id: `s${state.nextId++}`,
+    type: def.id,
+    owner: owner.id,
+    x: cell.x,
+    y: cell.y,
+    dir: ctx.source.dir,
+    hp: def.maxHp,
+    maxHp: def.maxHp,
+    statuses: [],
+  };
+  state.allies.push(ally);
+  events.push({
+    type: 'summoned',
+    unitId: ally.id,
+    summon: def.id,
+    side: 'heroes',
+    owner: owner.id,
+    at: { x: cell.x, y: cell.y },
+    dir: ally.dir,
+    hp: ally.hp,
+  });
+  emit(eng, 'summon', { actor: ctx.source, subject: ally, tags: ctx.tags });
+  emit(eng, 'enterCell', { actor: ctx.source, subject: ally, tags: ctx.tags });
+}
+
+/** Runs a rule's one-off effects when it is gained (items that change your maximum health). */
+export function gainRule(eng: Engine, player: Player, effects: readonly EffectSpec[] | undefined): void {
+  if (effects?.length)
+    runEffects(eng, effects, { source: player, target: pos(player), dir: player.dir, tags: [], event: null });
+}
+
 // ---- triggers -------------------------------------------------------------------------------------
 
 function related(rel: Relation | undefined, ref: UnitRef | null, owner: UnitRef): boolean {
@@ -585,13 +737,16 @@ function related(rel: Relation | undefined, ref: UnitRef | null, owner: UnitRef)
   }
 }
 
-function matches(t: TriggerDef, ev: TriggerEvent, owner: UnitRef): boolean {
+function matches(t: TriggerDef, ev: TriggerEvent, owner: UnitRef, ownerUnit: Unit | null): boolean {
   return (
     t.on === ev.on &&
     related(t.actor, ev.actor, owner) &&
     related(t.subject, ev.subject, owner) &&
     (t.tags ?? []).every((tag) => ev.tags.includes(tag)) &&
-    (!t.subjectStatus || ev.subjectStatuses.includes(t.subjectStatus))
+    (!t.subjectStatus || ev.subjectStatuses.includes(t.subjectStatus)) &&
+    (!t.backstab || ev.backstab) &&
+    (t.near === undefined || (!!ownerUnit && !!ev.cell && manhattan(ownerUnit, ev.cell) <= t.near)) &&
+    (t.ownerHpAtMost === undefined || (!!ownerUnit && ownerUnit.hp <= t.ownerHpAtMost))
   );
 }
 
@@ -600,6 +755,8 @@ interface Listener {
   readonly trigger: TriggerDef;
   readonly rule: string;
   readonly surface: Surface | null;
+  /** A once-per-room trigger: mark the rule as used when it fires. */
+  readonly once: boolean;
 }
 
 /**
@@ -611,17 +768,21 @@ function listeners(state: GameState, ev: TriggerEvent): Listener[] {
   for (const p of state.players) {
     if (p.hp <= 0) continue;
     const me = refOf(state, p);
-    const rules = [...p.passives.map((id) => getPassive(id)), ...p.modifiers.map((id) => getModifier(id))];
-    for (const r of rules)
-      for (const t of r.triggers) if (matches(t, ev, me)) out.push({ owner: p, trigger: t, rule: r.id, surface: null });
+    for (const r of playerRules(p))
+      for (const t of r.triggers) {
+        if (!matches(t, ev, me, p)) continue;
+        if (t.oncePerRoom && p.ruleUses.includes(r.id)) continue;
+        out.push({ owner: p, trigger: t, rule: r.id, surface: null, once: t.oncePerRoom === true });
+      }
   }
   for (const u of allUnits(state)) {
     const me = refOf(state, u);
     for (const s of u.statuses)
       for (const t of getStatus(s.id).triggers)
-        if (matches(t, ev, me)) out.push({ owner: u, trigger: t, rule: s.id, surface: null });
+        if (matches(t, ev, me, u)) out.push({ owner: u, trigger: t, rule: s.id, surface: null, once: false });
   }
-  if (ev.on === 'enterCell' && ev.cell) {
+  // Surfaces react to units stepping on them and to units ending a turn on them.
+  if ((ev.on === 'enterCell' || ev.on === 'turnEnd') && ev.cell) {
     const cell = ev.cell;
     for (const s of state.surfaces.filter((x) => same(x, cell))) {
       const me: UnitRef = { id: `surface:${s.id}`, side: s.side, owner: null };
@@ -630,7 +791,7 @@ function listeners(state: GameState, ev: TriggerEvent): Listener[] {
       const actor = s.side === 'heroes' ? state.players.find((p) => p.hp > 0) : subject;
       if (!actor) continue;
       for (const t of getSurface(s.id).triggers)
-        if (matches(t, ev, me)) out.push({ owner: actor, trigger: t, rule: s.id, surface: s });
+        if (matches(t, ev, me, null)) out.push({ owner: actor, trigger: t, rule: s.id, surface: s, once: false });
     }
   }
   return out;
@@ -657,6 +818,10 @@ export function settle(eng: Engine): void {
       eng.depth = ev.depth + 1;
       events.push({ type: 'triggered', rule: l.rule, ownerId: l.surface ? null : l.owner.id });
       if (l.surface && getSurface(l.surface.id).singleUse) removeSurface(eng, l.surface.id, l.surface);
+      if (l.once && isPlayer(state, l.owner)) {
+        if (l.owner.ruleUses.includes(l.rule)) continue;
+        l.owner.ruleUses.push(l.rule);
+      }
       runEffects(eng, l.trigger.effects, {
         source: l.owner,
         target: ev.cell ?? pos(l.owner),
@@ -679,7 +844,11 @@ export function tickDurations(eng: Engine): void {
   const { state, events } = eng;
   for (const u of allUnits(state)) {
     for (const s of u.statuses) s.turns--;
-    for (const s of u.statuses.filter((x) => x.turns <= 0)) removeStatus(eng, u, s.id);
+    for (const s of u.statuses.filter((x) => x.turns <= 0)) {
+      removeStatus(eng, u, s.id);
+      const after = getStatus(s.id).onExpire;
+      if (after) runEffects(eng, after, { source: u, target: pos(u), dir: u.dir, tags: [], event: null });
+    }
   }
   for (const s of state.surfaces) if (s.turns !== null) s.turns--;
   for (const s of state.surfaces.filter((x) => x.turns !== null && x.turns <= 0)) {

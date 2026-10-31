@@ -298,6 +298,7 @@ export class GameRenderer {
     this.doorsView.sync(state);
     if (this.rig) this.rig.snap(state.room, player, now);
     else this.rig = new CameraRig(this.camera, state.room, player, now);
+    this.rig.setRoom(state.room, this.topMargins());
   }
 
   /** Queues the events of one command for playback; `state` is where they lead. */
@@ -341,6 +342,20 @@ export class GameRenderer {
     this.rig?.look(dx, dy);
   }
 
+  /** −1 / +1 when the mouse look has gone past 45° right / left of the body (see CameraRig.lookTurn). */
+  lookTurn(): -1 | 0 | 1 {
+    return this.rig?.lookTurn() ?? 0;
+  }
+
+  expectMouseTurn(): void {
+    this.rig?.expectMouseTurn();
+  }
+
+  /** Screen fractions the top-view framing keeps clear: the progress bar and labels above the top doors. */
+  private topMargins(): { top: number; bottom: number } {
+    return { top: Math.min(0.3, 90 / Math.max(1, this.cssH)), bottom: Math.min(0.2, 30 / Math.max(1, this.cssH)) };
+  }
+
   setTopView(on: boolean, now: number): void {
     this.rig?.setTopView(on, now);
   }
@@ -367,8 +382,8 @@ export class GameRenderer {
     this.composer.setSize(this.cssW, this.cssH);
     this.camera.aspect = this.cssW / Math.max(1, this.cssH);
     this.camera.updateProjectionMatrix();
-    // Re-fit the overhead view to the new aspect ratio.
-    if (this.rig && this.currentRoom) this.rig.setRoom(this.currentRoom);
+    // Re-fit the overhead view to the new aspect ratio, leaving room for the progress bar and door labels.
+    if (this.rig && this.currentRoom) this.rig.setRoom(this.currentRoom, this.topMargins());
   }
 
   // ---- event playback -------------------------------------------------------------------------
@@ -595,6 +610,17 @@ export class GameRenderer {
         else if (impact) cellLabels.push({ cell: impact, text: String(e.intent.damage), kind: 'intent' });
       }
     }
+    // Where W leads: a faint frame on the free cell ahead (only when nothing is being aimed).
+    const me = this.target_?.players[0];
+    if (me && !this.preview && !this.isBusy(now) && me.hp > 0) {
+      const ahead = { x: me.x + [0, 1, 0, -1][me.dir]!, y: me.y + [-1, 0, 1, 0][me.dir]! };
+      const t = this.target_;
+      const free =
+        t &&
+        getCell(t.room.grid, ahead.x, ahead.y) === 'floor' &&
+        ![...t.enemies, ...t.allies].some((u) => u.x === ahead.x && u.y === ahead.y);
+      if (free) list.push({ cell: ahead, kind: 'step' });
+    }
     if (this.preview && !this.isBusy(now)) {
       const { preview, target, options } = this.preview;
       for (const c of options) if (c.x !== target.x || c.y !== target.y) list.push({ cell: c, kind: 'option' });
@@ -645,6 +671,7 @@ export class GameRenderer {
     this.room.lavaMaterial.uniforms.uTime!.value = s;
     this.fx.update(now);
     this.doorsView.update(now);
+    this.surfacesView.update(now);
 
     // Top view: clear the fog, lift the ambient light, drop the ceiling, show the player marker.
     this.fog.density = FOG_DENSITY * (1 - top);

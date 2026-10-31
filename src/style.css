@@ -1001,3 +1001,96 @@ kbd {
     opacity: 0;
   }
 }
+
+/* ---- M4: build panel, badges, hybrid announcement ------------------------------------------------ */
+
+.badge {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 0 5px;
+  font-size: 10px;
+  color: var(--ink-dim);
+  border: 1px solid var(--border);
+}
+
+.badge-cursed {
+  color: #ffb0a0;
+  border-color: #a83224;
+  background: rgba(120, 20, 10, 0.5);
+  margin-left: 6px;
+}
+
+.reward-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.mod-item {
+  color: #ffe0a0;
+}
+
+.mod-item.cursed {
+  color: #ffb0a0;
+}
+
+.mod-hybrid {
+  color: #ffffff;
+  font-weight: bold;
+}
+
+.hud-hybrid {
+  color: #ffffff;
+}
+
+.reward-item .reward-name {
+  color: #ffd090;
+}
+
+.reward-class .reward-name {
+  color: #ffffff;
+}
+
+.hybrid-news {
+  position: absolute;
+  left: 50%;
+  top: 30%;
+  transform: translate(-50%, -50%);
+  padding: 18px 36px;
+  font-size: 30px;
+  color: #fff;
+  text-align: center;
+  background: rgba(20, 8, 30, 0.85);
+  border: 2px solid #d0a8ff;
+  box-shadow: 0 0 30px rgba(200, 150, 255, 0.5);
+  animation: hybrid-news 3.2s ease-out forwards;
+  pointer-events: none;
+}
+
+@keyframes hybrid-news {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.85);
+  }
+  12% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Top view: the room needs the whole screen, so the ability bar steps aside. */
+.top-view .bottom-stack {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.app {
+  position: absolute;
+  inset: 0;
+}

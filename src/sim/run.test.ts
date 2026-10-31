@@ -46,10 +46,9 @@ describe('run: rooms, rewards, doors', () => {
     expect(run.phase).toBe('reward');
     expect(run.offer.length).toBeGreaterThan(0);
     expect(run.offer.length).toBeLessThanOrEqual(ACT.offer);
-    // The Knight's pool abilities come first, upgrades fill the rest.
-    expect(run.offer.filter((o) => o.kind === 'ability').map((o) => (o.kind === 'ability' ? o.id : ''))).toEqual(
-      expect.arrayContaining(['knight.dash', 'knight.challenge']),
-    );
+    // Three of the Knight's four pool abilities.
+    const pool = ['knight.dash', 'knight.challenge', 'knight.shieldWall', 'knight.crush'];
+    expect(run.offer.every((o) => o.kind === 'ability' && pool.includes(o.id))).toBe(true);
     const taken = apply(cleared.state, choose(0));
     expect(taken.state.players[0]!.abilities).toHaveLength(3);
     expect(taken.state.run!.phase).toBe('doors');
@@ -120,13 +119,13 @@ describe('run: rooms, rewards, doors', () => {
     expect(r.state.players[0]!.cooldowns).toEqual([{ abilityId: 'knight.shieldBash', turns: 2 }]);
   });
 
-  it('an elite room has tougher enemies (and one more) and rewards a modifier', () => {
+  it('an elite room has tougher enemies (and one more) and rewards an item', () => {
     const s = createGame(8);
     const events: GameEvent[] = [];
     enterRoom(s, 3, 'elite', 'elite', events);
     expect(s.enemies.every((e) => e.elite && e.hp === e.maxHp && e.maxHp >= 5)).toBe(true);
     const cleared = apply(s, killAll).state;
-    expect(cleared.run!.offer.every((o) => o.kind === 'modifier')).toBe(true);
+    expect(cleared.run!.offer.every((o) => o.kind === 'item')).toBe(true);
   });
 
   it('a rest room heals half your health and opens its doors at once', () => {
@@ -228,10 +227,14 @@ describe('boss: the crypt warden', () => {
     expect(r.events.filter((e) => e.type === 'pushed')).toHaveLength(1);
   });
 
-  it('killing the warden wins the run', () => {
+  it('killing the warden offers an item for the road, then the run is won', () => {
     const boss = apply(createGame(4), { type: 'debug', playerId: 'p1', action: 'toBoss' }).state;
     const r = apply(boss, killAll);
-    expect(r.state.run!.phase).toBe('won');
-    expect(of(r.events, 'runEnded')).toEqual([{ type: 'runEnded', result: 'won' }]);
+    expect(r.state.run!.phase).toBe('reward');
+    expect(r.state.run!.offer.every((o) => o.kind === 'item')).toBe(true);
+    const r2 = apply(r.state, choose(0));
+    expect(r2.state.run!.phase).toBe('won');
+    expect(r2.state.players[0]!.items).toHaveLength(1);
+    expect(of(r2.events, 'runEnded')).toEqual([{ type: 'runEnded', result: 'won' }]);
   });
 });

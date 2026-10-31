@@ -31,14 +31,36 @@ export type UnitSelector =
       readonly radius: number;
       readonly filter: UnitFilter;
       readonly includeCenter?: boolean;
-    };
+      /** Count distance as a square (3×3 for radius 1) instead of steps. */
+      readonly square?: boolean;
+    }
+  /** Everyone on the cell in front of the actor and the two cells beside it (a sweeping blow). */
+  | { readonly kind: 'frontRow' }
+  /** The single nearest unit to a centre (not on it) that passes the filter. */
+  | { readonly kind: 'nearest'; readonly center: 'target' | 'self' | 'subject'; readonly filter: UnitFilter }
+  /** The unit right behind the subject (triggers) or the target, seen from the actor: a blow that goes through. */
+  | { readonly kind: 'beyond' };
 
-/** A cell an effect works on. `from` is where a moving unit left (triggers on `moved`). */
-export type CellSelector = 'target' | 'self' | 'subject' | 'from';
+/**
+ * A cell an effect works on. `from` is where a moving unit left (triggers on `moved`, `pushed`).
+ * The object form finds the nearest free floor cell around a point, optionally one with a surface.
+ */
+export type CellSelector =
+  | 'target'
+  | 'self'
+  | 'subject'
+  | 'from'
+  | { readonly near: 'target' | 'self' | 'subject'; readonly radius: number; readonly surface?: readonly string[] };
 
 /** Effect primitives. Every ability, status, surface and modifier is built from these. */
 export type EffectSpec =
-  | { readonly kind: 'damage'; readonly amount: number; readonly to?: UnitSelector }
+  | {
+      readonly kind: 'damage';
+      readonly amount: number;
+      readonly to?: UnitSelector;
+      /** Adds the amount of this status on the damaged unit (stacking poison). */
+      readonly fromStatus?: string;
+    }
   /** Pushes away from the action (or away from the centre of an `around` selection). */
   | { readonly kind: 'push'; readonly distance: number; readonly to?: UnitSelector }
   /** Moves the acting unit to the free cell behind the target unit, facing it. */
@@ -57,10 +79,29 @@ export type EffectSpec =
       readonly amount?: number;
       readonly to?: UnitSelector;
     }
-  | { readonly kind: 'surface'; readonly surface: string; readonly at: CellSelector; readonly turns?: number }
+  | {
+      readonly kind: 'surface';
+      readonly surface: string;
+      readonly at: CellSelector;
+      readonly turns?: number;
+      /** Covers the square of this radius around the cell (1 = 3×3). */
+      readonly radius?: number;
+    }
   /** Removes a surface from a cell (e.g. a used trap or a corpse turned into a skeleton). */
   | { readonly kind: 'clearSurface'; readonly surface: string; readonly at: CellSelector }
-  | { readonly kind: 'summon'; readonly unit: string; readonly at: CellSelector; readonly consumes?: string }
+  | {
+      readonly kind: 'summon';
+      readonly unit: string;
+      /** One cell, or the row of three cells in front of the summoner. */
+      readonly at: CellSelector | 'frontRow';
+      /** The cell must hold one of these surfaces, which is used up. */
+      readonly consumes?: readonly string[];
+    }
+  | { readonly kind: 'removeStatus'; readonly status: string; readonly to?: UnitSelector }
+  /** Shifts every cooldown of the owner by `delta` turns (negative = sooner). */
+  | { readonly kind: 'cooldowns'; readonly delta: number }
+  /** Changes the owner's maximum health (and keeps health within it). */
+  | { readonly kind: 'maxHp'; readonly add?: number; readonly set?: number }
   | { readonly kind: 'heal'; readonly amount: number; readonly to?: UnitSelector }
   /** Shield points on a unit: a `shield`-flagged status with an amount. */
   | { readonly kind: 'shield'; readonly amount: number; readonly turns: number; readonly to?: UnitSelector }
@@ -87,7 +128,7 @@ export type TargetSpec =
       readonly freeBehind?: boolean;
     }
   /** An empty floor cell within `range` steps, optionally one with a given surface. */
-  | { readonly kind: 'cell'; readonly range: number; readonly surface?: string };
+  | { readonly kind: 'cell'; readonly range: number; readonly surface?: readonly string[] };
 
 export interface AbilityDef {
   readonly id: string;
@@ -111,7 +152,25 @@ export type StatId =
   /** Damage multiplier for hits from behind (added to 1). */
   | 'backstab'
   /** Extra damage this unit takes from every hit. */
-  | 'damageTaken';
+  | 'damageTaken'
+  /** Extra cells of range for projectiles. */
+  | 'projectileRange'
+  /** Extra damage on every attack this unit makes. */
+  | 'damageDealt'
+  /** Damage multiplier on attacks (added to 1). */
+  | 'damageFactor'
+  /** Cannot step backwards. */
+  | 'noRetreat'
+  /** Abilities have no cooldown but each use costs this much health. */
+  | 'bloodPrice'
+  /** Extra units on every summon. */
+  | 'extraSummons'
+  /** Summons strike with their owner's base attack instead of their own blow. */
+  | 'summonsUseBaseAttack'
+  /** Extra damage dealt by summons standing next to their owner. */
+  | 'auraDamage'
+  /** Extra copies of every upgrade reward. */
+  | 'upgradeBonus';
 
 export interface StatMod {
   readonly stat: StatId;
@@ -120,7 +179,21 @@ export interface StatMod {
 
 /** Engine events rules can react to (GDD 2). */
 export type TriggerOn =
-  'hit' | 'kill' | 'damaged' | 'moved' | 'enterCell' | 'turnStart' | 'turnEnd' | 'death' | 'summon';
+  | 'hit'
+  | 'kill'
+  | 'damaged'
+  | 'moved'
+  | 'enterCell'
+  | 'turnStart'
+  | 'turnEnd'
+  | 'death'
+  | 'summon'
+  /** A unit was pushed (once per push; `from` is where it started). */
+  | 'pushed'
+  /** A pushed unit hit a wall, pillar, door or another unit. */
+  | 'collide'
+  /** The fight in a room begins. */
+  | 'roomStart';
 
 /** How a unit in an event relates to the owner of the rule that listens. */
 export type Relation = 'owner' | 'ownerSide' | 'ownSummon' | 'foe' | 'any';
@@ -134,15 +207,37 @@ export interface TriggerDef {
   readonly tags?: readonly Tag[];
   /** The subject had this status when the event happened. */
   readonly subjectStatus?: string;
+  /** The subject was at most this many steps from the owner. */
+  readonly near?: number;
+  /** The owner's health was at most this. */
+  readonly ownerHpAtMost?: number;
+  /** Only the first time in each room. */
+  readonly oncePerRoom?: boolean;
+  /** Only hits from behind. */
+  readonly backstab?: boolean;
   readonly effects: readonly EffectSpec[];
 }
 
-/** Passives, modifiers (and later items and gifts): stat changes plus triggers. */
+/** Passives, modifiers, items, hybrid features (and later gifts): stat changes plus triggers. */
 export interface RuleDef {
   readonly id: string;
   readonly nameKey: string;
   readonly stats: readonly StatMod[];
   readonly triggers: readonly TriggerDef[];
+  /** Effects run once when the rule is gained (an item that lowers your maximum health). */
+  readonly onGain?: readonly EffectSpec[];
+  /** Items: drawn in the build panel. */
+  readonly icon?: string;
+  /** Items: a strong upside with a real downside. */
+  readonly cursed?: boolean;
+}
+
+/** Two classes together become a hybrid with its own name and feature (an idea of the owner, M4). */
+export interface HybridDef {
+  readonly id: string;
+  readonly nameKey: string;
+  readonly classes: readonly [string, string];
+  readonly rule: RuleDef;
 }
 
 export interface StatusDef {
@@ -160,6 +255,18 @@ export interface StatusDef {
   readonly stun?: boolean;
   /** The holder targets whoever applied it. */
   readonly taunt?: boolean;
+  /** Applying it again adds to its amount instead of keeping the larger. */
+  readonly stacks?: boolean;
+  /** The holder neither moves nor turns (its telegraphed blow still lands). */
+  readonly rooted?: boolean;
+  /** The holder's attacks miss. */
+  readonly blind?: boolean;
+  /** Projectiles coming at the holder from the front do nothing. */
+  readonly frontGuard?: boolean;
+  /** When the holder dies, the status moves to the nearest unit on the holder's side. */
+  readonly jumps?: boolean;
+  /** Effects run on the holder when the status runs out. */
+  readonly onExpire?: readonly EffectSpec[];
 }
 
 export interface SurfaceDef {
@@ -180,6 +287,8 @@ export interface SummonDef {
   /** Which voxel model the renderer draws. */
   readonly model: string;
   readonly tags: readonly Tag[];
+  /** Does not act (walls, decoys): it only takes up space and draws attacks. */
+  readonly inert?: boolean;
 }
 
 export interface ClassDef {
@@ -228,7 +337,17 @@ export interface EnemyDef {
 }
 
 /** What a door offers (GDD 1): shown on the door, granted after clearing the room behind it. */
-export type RewardKind = 'ability' | 'modifier' | 'upgrade' | 'rest' | 'elite' | 'boss';
+export type RewardKind =
+  | 'ability'
+  | 'modifier'
+  | 'upgrade'
+  | 'rest'
+  | 'elite'
+  | 'boss'
+  /** A second class (GDD 2). */
+  | 'initiation'
+  /** Pick an item. */
+  | 'treasure';
 
 /** Ability upgrades (a general reward, M3): faster cooldown or one more damage on every hit. */
 export type UpgradeKind = 'cooldown' | 'damage';

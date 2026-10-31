@@ -5,7 +5,7 @@ import { generateRoom, type Room } from './gen/room';
 import { placeCorpses, placeEncounter } from './encounter';
 import { declareIntentsInPlace } from './ai';
 
-export const STATE_VERSION = 6;
+export const STATE_VERSION = 7;
 
 export interface Cooldown {
   readonly abilityId: string;
@@ -33,7 +33,16 @@ interface UnitBase {
 }
 
 export interface Player extends UnitBase {
+  /** The class picked at the start of the run (its base attack stays). */
   readonly classId: string;
+  /** Every class the hero has: the first one, then any taken through Initiation. */
+  classes: string[];
+  /** Hybrid formed by two of the classes (GDD idea of the owner), or null. */
+  hybrid: string | null;
+  /** Items (rules that change how you play), in the order they were found. */
+  items: string[];
+  /** Rules with a once-per-room trigger that already fired in this room. */
+  ruleUses: string[];
   /** Ability ids in slot order; the first is the base attack (also used by walking into an enemy). */
   abilities: string[];
   passives: string[];
@@ -107,6 +116,8 @@ export interface DoorOffer {
 export type RewardOption =
   | { readonly kind: 'ability'; readonly id: string }
   | { readonly kind: 'modifier'; readonly id: string }
+  | { readonly kind: 'item'; readonly id: string }
+  | { readonly kind: 'class'; readonly id: string }
   | { readonly kind: 'upgrade'; readonly abilityId: string; readonly upgrade: UpgradeKind };
 
 /** Run journal entries (for the results screen now, analytics later). */
@@ -132,6 +143,9 @@ export interface RunState {
   offer: RewardOption[];
   doors: DoorOffer[];
   elites: number;
+  /** An Initiation door has been offered in this act. */
+  initiation: boolean;
+  treasures: number;
   /** Turns spent in finished rooms. */
   turns: number;
   log: RunLogEntry[];
@@ -181,6 +195,10 @@ export function createPlayer(id: string, classId: string, x: number, y: number, 
   return {
     id,
     classId,
+    classes: [classId],
+    hybrid: null,
+    items: [],
+    ruleUses: [],
     x,
     y,
     dir,
@@ -220,6 +238,8 @@ export function createGame(seed: number, opts: CreateGameOptions = {}): GameStat
       offer: [],
       doors: [],
       elites: 0,
+      initiation: false,
+      treasures: 0,
       turns: 0,
       log: [{ type: 'room', depth: 1, kind: 'combat' }],
     },

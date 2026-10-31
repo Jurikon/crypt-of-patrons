@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks';
-import { ABILITIES, ABILITY_SLOTS, CLASSES, MODIFIERS } from '../content';
+import { ABILITIES, ABILITY_SLOTS, CLASSES, ITEMS, MODIFIERS } from '../content';
 import { abilityName, describeAbility, describeRule } from '../ui/describe';
 import { t, type TextKey } from '../i18n';
 import type { DebugAction } from '../sim';
@@ -16,6 +16,8 @@ export interface OverlayActions {
   setClass(classId: string): void;
   grantAbility(abilityId: string, slot: number): void;
   toggleModifier(modifierId: string): void;
+  toggleItem(itemId: string): void;
+  addClass(classId: string): void;
   resetSave(): void;
 }
 
@@ -101,6 +103,15 @@ export function DebugOverlay({ view, actions }: { view: ViewState; actions: Over
         ))}
       </div>
 
+      <div class="debug-buttons">
+        <span>{t('debug.addClass')}</span>
+        {CLASSES.filter((c) => !p?.classes.includes(c.id)).map((c) => (
+          <button type="button" key={c.id} onClick={() => actions.addClass(c.id)} data-testid={`add-${c.id}`}>
+            + {t(c.nameKey as TextKey)}
+          </button>
+        ))}
+      </div>
+
       <div class="debug-section">{t('debug.grant')}</div>
       <select
         class="debug-select"
@@ -143,6 +154,22 @@ export function DebugOverlay({ view, actions }: { view: ViewState; actions: Over
               data-testid={`mod-${m.id}`}
             />
             {t(m.nameKey as TextKey)}
+          </label>
+        ))}
+      </div>
+
+      <div class="debug-section">{t('debug.items')}</div>
+      <div class="debug-mods">
+        {ITEMS.map((it) => (
+          <label key={it.id} title={describeRule(it)}>
+            <input
+              type="checkbox"
+              checked={p?.items.includes(it.id) ?? false}
+              onChange={() => actions.toggleItem(it.id)}
+              data-testid={`item-${it.id}`}
+            />
+            {it.icon} {t(it.nameKey as TextKey)}
+            {it.cursed ? ' ☠' : ''}
           </label>
         ))}
       </div>

@@ -12,6 +12,8 @@ export const REWARD_COLORS: Record<RewardKind, number> = {
   rest: 0xffb0c8,
   elite: 0xff4a3a,
   boss: 0xb070ff,
+  initiation: 0xffffff,
+  treasure: 0xffa020,
 };
 
 /** How far into the door cell the arch's back (the planks) sits; the portal hangs just in front. */
