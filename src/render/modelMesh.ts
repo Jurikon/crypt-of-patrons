@@ -4,8 +4,44 @@ import { toGeometry } from './caveMesh';
 import { createVolume, greedyMesh, setVoxel } from './voxel/mesher';
 import type { ModelVoxel, VoxelModel } from './voxel/models';
 
-/** Outline shell thickness: each surface voxel gets a dark back-faced cube this much larger. */
-const OUTLINE_SCALE = 1.16;
+/** Outline thickness as a fraction of a voxel. */
+const OUTLINE = 0.3;
+
+/**
+ * Silhouette outline: every visible face pushed out along its normal and grown a little in its plane,
+ * drawn back-faced. Faces towards the camera are culled, so only a thin rim shows around the edges;
+ * nothing pokes through between voxels the way per-voxel enlarged cubes did.
+ */
+function outlineFrom(mesh: THREE.BufferGeometry, d: number): THREE.BufferGeometry {
+  const pos = mesh.getAttribute('position') as THREE.BufferAttribute;
+  const nrm = mesh.getAttribute('normal') as THREE.BufferAttribute;
+  const out = new Float32Array(pos.count * 3);
+  for (let q = 0; q < pos.count; q += 4) {
+    let cx = 0;
+    let cy = 0;
+    let cz = 0;
+    for (let k = 0; k < 4; k++) {
+      cx += pos.getX(q + k) / 4;
+      cy += pos.getY(q + k) / 4;
+      cz += pos.getZ(q + k) / 4;
+    }
+    for (let k = 0; k < 4; k++) {
+      const i = q + k;
+      const nx = nrm.getX(i);
+      const ny = nrm.getY(i);
+      const nz = nrm.getZ(i);
+      const grow = (v: number, c: number, n: number) => (n !== 0 ? n * d : Math.sign(v - c) * d);
+      out[i * 3] = pos.getX(i) + grow(pos.getX(i), cx, nx);
+      out[i * 3 + 1] = pos.getY(i) + grow(pos.getY(i), cy, ny);
+      out[i * 3 + 2] = pos.getZ(i) + grow(pos.getZ(i), cz, nz);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(out, 3));
+  g.setIndex(mesh.getIndex());
+  g.computeBoundingSphere();
+  return g;
+}
 
 export interface PartGeometry {
   readonly mesh: THREE.BufferGeometry;
@@ -50,29 +86,14 @@ function buildPart(voxels: readonly ModelVoxel[], model: VoxelModel, yCentred: b
   const data = greedyMesh(vol, { include: (v) => v > 0, occludes: (v) => v > 0, outside: false });
   const mesh = toGeometry(data, s, offset, (v) => model.palette[v] ?? [1, 0, 1]);
 
-  const key = (x: number, y: number, z: number) => `${x},${y},${z}`;
-  const filled = new Set(voxels.map(([x, y, z]) => key(x, y, z)));
-  const boxes: THREE.BufferGeometry[] = [];
-  const parts: { pos: THREE.Vector3; color: THREE.Color }[] = [];
-  for (const [x, y, z, c] of voxels) {
-    const centre = new THREE.Vector3(x * s, (y + 0.5 + yShift) * s, z * s);
+  const parts = voxels.map(([x, y, z, c]) => {
     const rgb = model.palette[c] ?? [1, 0, 1];
-    parts.push({ pos: centre, color: new THREE.Color(rgb[0], rgb[1], rgb[2]) });
-    const surface =
-      !filled.has(key(x + 1, y, z)) ||
-      !filled.has(key(x - 1, y, z)) ||
-      !filled.has(key(x, y + 1, z)) ||
-      !filled.has(key(x, y - 1, z)) ||
-      !filled.has(key(x, y, z + 1)) ||
-      !filled.has(key(x, y, z - 1));
-    if (!surface) continue;
-    const b = new THREE.BoxGeometry(s * OUTLINE_SCALE, s * OUTLINE_SCALE, s * OUTLINE_SCALE);
-    b.deleteAttribute('uv');
-    b.translate(centre.x, centre.y, centre.z);
-    boxes.push(b);
-  }
-  const outline = mergeGeometries(boxes) ?? new THREE.BufferGeometry();
-  for (const b of boxes) b.dispose();
+    return {
+      pos: new THREE.Vector3(x * s, (y + 0.5 + yShift) * s, z * s),
+      color: new THREE.Color(rgb[0], rgb[1], rgb[2]),
+    };
+  });
+  const outline = outlineFrom(mesh, OUTLINE * s);
   return { mesh, outline, voxels: parts };
 }
 

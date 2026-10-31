@@ -25,8 +25,8 @@ export interface VoxelModel {
   readonly poses: { readonly idle: number; readonly windup: number; readonly strike: number };
 }
 
-/** About 34 voxels from feet to crown: roughly 1.7 world units. */
-const VOXEL = 0.05;
+/** About 46 voxels from feet to crown: roughly 1.9 world units. */
+const VOXEL = 0.04;
 
 // Palette indices.
 const BONE = [1, 2, 3] as const;
@@ -43,26 +43,30 @@ const WOOD_DARK = 13;
 const STRING = 14;
 const FEATHER = 15;
 const SOCKET = 16;
+const BRASS = 17;
 
 const PALETTE: readonly Rgb[] = [
   [0, 0, 0],
   [0.86, 0.79, 0.64],
-  [0.78, 0.7, 0.55],
-  [0.93, 0.87, 0.72],
-  [0.46, 0.38, 0.29],
-  [0.68, 0.67, 0.73],
-  [0.9, 0.9, 0.95],
-  [0.36, 0.16, 0.08],
-  [0.25, 0.23, 0.27],
-  [0.48, 0.22, 0.1],
-  [0.32, 0.07, 0.1],
-  [0.2, 0.04, 0.07],
-  [0.44, 0.23, 0.1],
+  [0.76, 0.68, 0.53],
+  [0.94, 0.88, 0.74],
+  [0.42, 0.34, 0.26],
+  [0.66, 0.66, 0.72],
+  [0.92, 0.92, 0.97],
+  [0.36, 0.17, 0.08],
+  [0.24, 0.22, 0.26],
+  [0.5, 0.23, 0.1],
+  [0.42, 0.06, 0.06],
+  [0.24, 0.03, 0.05],
+  [0.46, 0.25, 0.11],
   [0.3, 0.14, 0.06],
-  [0.82, 0.77, 0.62],
-  [0.72, 0.64, 0.52],
-  [0.08, 0.03, 0.03],
+  [0.84, 0.79, 0.64],
+  [0.78, 0.7, 0.56],
+  [0.07, 0.02, 0.02],
+  [0.78, 0.55, 0.18],
 ];
+
+const boneAt = (x: number, y: number, z: number) => BONE[Math.floor(hash3(x + 40, y + 40, z + 40) * 3)] as number;
 
 /** Collects voxels by position; later writes replace earlier ones. */
 class Shape {
@@ -72,19 +76,40 @@ class Shape {
     this.cells.set(`${x},${y},${z}`, [x, y, z, c]);
   }
 
+  has(x: number, y: number, z: number): boolean {
+    return this.cells.has(`${x},${y},${z}`);
+  }
+
   clear(x: number, y: number, z: number): void {
     this.cells.delete(`${x},${y},${z}`);
   }
 
-  box(x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, c: number | (() => number)): void {
-    for (let y = y0; y <= y1; y++)
-      for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) this.set(x, y, z, typeof c === 'number' ? c : c());
+  /** Fills the box between two corners (inclusive, in any order). */
+  box(x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, c: number | 'bone'): void {
+    for (let y = Math.min(y0, y1); y <= Math.max(y0, y1); y++)
+      for (let z = Math.min(z0, z1); z <= Math.max(z0, z1); z++)
+        for (let x = Math.min(x0, x1); x <= Math.max(x0, x1); x++)
+          this.set(x, y, z, c === 'bone' ? boneAt(x, y, z) : c);
   }
 
-  /** Bone-coloured box with slight per-voxel variation. */
-  bone(x0: number, x1: number, y0: number, y1: number, z0: number, z1: number): void {
-    for (let y = y0; y <= y1; y++)
-      for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) this.set(x, y, z, boneAt(x, y, z));
+  /** Voxels inside an ellipsoid; `shell` keeps only the outer layer of that relative thickness (0..1). */
+  ellipsoid(
+    cx: number,
+    cy: number,
+    cz: number,
+    rx: number,
+    ry: number,
+    rz: number,
+    c: number | 'bone',
+    shell = 1,
+  ): void {
+    for (let y = Math.floor(cy - ry); y <= Math.ceil(cy + ry); y++)
+      for (let z = Math.floor(cz - rz); z <= Math.ceil(cz + rz); z++)
+        for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++) {
+          const r = Math.hypot((x - cx) / rx, (y - cy) / ry, (z - cz) / rz);
+          if (r > 1 || r < 1 - shell) continue;
+          this.set(x, y, z, c === 'bone' ? boneAt(x, y, z) : c);
+        }
   }
 
   voxels(): ModelVoxel[] {
@@ -92,128 +117,168 @@ class Shape {
   }
 }
 
-const boneAt = (x: number, y: number, z: number) => BONE[Math.floor(hash3(x + 40, y + 40, z + 40) * 3)] as number;
-
 /**
  * The shared skeleton without its swinging arm: feet, shins, knees, thighs, pelvis, spine, ribcage,
- * collarbones, the other arm, and a skull with sockets, nose hole and jaw.
+ * collarbones, the other arm with a hand, and a big skull with brow, cheekbones, sockets and a jaw.
+ * `side` is the static arm's side (+1 right, −1 left).
  */
-function skeleton(staticSide: 1 | -1): { body: Shape; eyes: [number, number, number][] } {
+function skeleton(side: 1 | -1): { body: Shape; eyes: [number, number, number][] } {
   const s = new Shape();
-  for (const side of [-1, 1]) {
-    const x0 = side < 0 ? -3 : 2;
-    s.bone(x0 - (side < 0 ? 1 : 0), x0 + (side > 0 ? 1 : 0), 0, 1, -1, 2); // foot
-    s.bone(x0, x0, 2, 8, 0, 0); // shin
-    s.bone(x0 - 1 + (side > 0 ? 1 : 0), x0 + (side > 0 ? 1 : 0), 9, 9, 0, 1); // knee
-    s.bone(x0, x0, 10, 15, 0, 0); // thigh
+  for (const out of [-1, 1] as const) {
+    const x = out > 0 ? 2 : -2; // inner column of each leg
+    s.box(x - out, x + 2 * out, 0, 1, -1, 4, 'bone'); // foot
+    for (const tz of [1, 3]) s.set(x + 2 * out, 1, tz, BONE_DARK); // toe gaps
+    s.box(x, x + out, 2, 11, 0, 1, 'bone'); // shin
+    s.box(x - out, x + 2 * out, 12, 13, -1, 2, BONE_DARK); // knee
+    s.box(x, x + out, 12, 13, 0, 2, 'bone');
+    s.box(x, x + out, 14, 19, 0, 1, 'bone'); // thigh
   }
-  s.bone(-4, 4, 16, 17, -1, 1); // pelvis
-  s.clear(0, 16, 1);
-  s.clear(0, 17, 1);
-  for (let y = 16; y <= 25; y++) {
-    s.set(0, y, -1, boneAt(0, y, -1)); // spine
-    if (y % 2 === 0) s.set(0, y, -2, BONE_DARK); // vertebra spurs
+  // Pelvis: a wide bowl with a gap at the front.
+  s.ellipsoid(0, 21, 0, 5.6, 2.2, 3.2, 'bone', 0.5);
+  for (let y = 19; y <= 23; y++) s.clear(0, y, 3);
+  // Spine with vertebra spurs.
+  for (let y = 20; y <= 33; y++) {
+    s.box(0, 0, y, y, -3, -2, 'bone');
+    if (y % 2 === 0) s.box(-1, 1, y, y, -3, -3, BONE_DARK);
   }
-  for (const y of [19, 21, 23]) {
-    // Ribs: a ring around the chest, open at the front except for the sternum.
-    for (let x = -4; x <= 4; x++) {
-      s.set(x, y, -2, boneAt(x, y, -2));
-      if (Math.abs(x) >= 2) s.set(x, y, 2, boneAt(x, y, 2));
+  // Ribcage: curved ribs around the chest, open at the front except the sternum.
+  for (const y of [24, 26, 28, 30]) {
+    const rx = y === 24 ? 4.6 : 5.6;
+    for (let a = 0; a < 64; a++) {
+      const t = (a / 64) * Math.PI * 2;
+      const x = Math.round(Math.sin(t) * rx);
+      const z = Math.round(Math.cos(t) * 3.4);
+      if (z >= 2 && Math.abs(x) <= 1) continue;
+      s.set(x, y, z, boneAt(x, y, z));
     }
-    for (let z = -1; z <= 1; z++) {
-      s.set(-4, y, z, boneAt(-4, y, z));
-      s.set(4, y, z, boneAt(4, y, z));
-    }
   }
-  s.bone(0, 0, 19, 24, 2, 2); // sternum
-  s.bone(-5, 5, 25, 25, 0, 0); // collarbones
-  s.bone(0, 0, 26, 26, -1, 0); // neck
-  // Static arm: upper arm, elbow, forearm, hand.
-  const ax = staticSide * 5;
-  s.bone(ax, ax, 19, 24, 0, 0);
-  s.set(ax, 18, 0, BONE_DARK);
-  s.bone(ax, ax, 12, 17, 0, 0);
-  s.bone(Math.min(ax, ax + staticSide), Math.max(ax, ax + staticSide), 10, 11, 0, 1);
+  s.box(0, 0, 24, 31, 3, 3, 'bone'); // sternum
+  s.box(-7, 7, 32, 33, 0, 1, 'bone'); // collarbones and shoulder girdle
+  s.box(0, 0, 34, 35, -1, 0, 'bone'); // neck
 
-  // Skull: a rounded block with sockets, nose hole and a jaw with teeth.
-  for (let y = 28; y <= 34; y++)
-    for (let z = -3; z <= 3; z++)
-      for (let x = -3; x <= 3; x++) {
-        const corner = (Math.abs(x) === 3 ? 1 : 0) + (Math.abs(z) === 3 ? 1 : 0) + (y === 28 || y === 34 ? 1 : 0);
-        if (corner >= 2) continue;
-        s.set(x, y, z, boneAt(x, y, z));
-      }
-  // Eye sockets: the glowing eye fills the lower half, the upper half is a dark recess.
-  for (const ex of [-2, -1, 1, 2]) {
-    s.clear(ex, 30, 3);
-    s.clear(ex, 31, 3);
-    s.set(ex, 31, 2, SOCKET);
+  // Static arm: shoulder joint, upper arm, elbow, two forearm bones, hand with fingers and thumb.
+  const ax = side * 7;
+  s.ellipsoid(ax, 32, 0.5, 1.6, 1.6, 1.6, BONE_DARK);
+  s.box(ax, ax - side, 25, 31, 0, 1, 'bone');
+  s.box(ax + side, ax - 2 * side, 24, 24, 0, 1, BONE_DARK);
+  s.box(ax, ax, 17, 23, 0, 0, 'bone');
+  s.box(ax - side, ax - side, 17, 23, 1, 1, 'bone');
+  s.box(ax, ax - side, 15, 16, -1, 2, 'bone'); // palm
+  for (const fz of [-1, 1]) s.box(ax, ax - side, 13, 14, fz, fz, 'bone'); // fingers
+  s.box(ax - 2 * side, ax - 2 * side, 14, 15, 2, 2, 'bone'); // thumb
+
+  // Skull: big and rounded, with brow ridge, cheekbones, sockets, nose hole, and a jaw with teeth.
+  s.ellipsoid(0, 41, 0, 5, 5, 5, 'bone');
+  for (let y = 36; y <= 38; y++) s.box(-4, 4, y, y, -2, 4, 'bone'); // face block under the dome
+  s.box(-4, 4, 41, 41, 5, 5, BONE_DARK); // brow ridge
+  for (const cx of [-4, 4]) s.box(cx, cx, 38, 38, 3, 5, BONE_DARK); // cheekbones
+  const eyes: [number, number, number][] = [];
+  for (const ex of [-3, -2, 2, 3]) {
+    for (const ey of [39, 40]) {
+      s.clear(ex, ey, 5);
+      s.clear(ex, ey, 4);
+      s.set(ex, ey, 3, SOCKET);
+    }
+    eyes.push([ex, 39, 4]);
   }
-  s.set(0, 29, 3, SOCKET); // nose
-  s.bone(-2, 2, 26, 27, 0, 3); // jaw
-  for (let x = -2; x <= 2; x++) s.set(x, 27, 3, x % 2 === 0 ? BONE[2] : SOCKET); // teeth
-  s.clear(-2, 26, 3);
-  s.clear(2, 26, 3);
-  const eyes: [number, number, number][] = [
-    [-2, 30, 3],
-    [-1, 30, 3],
-    [1, 30, 3],
-    [2, 30, 3],
-  ];
+  s.clear(0, 37, 5);
+  s.clear(0, 37, 4);
+  s.set(0, 37, 3, SOCKET); // nose hole
+  // Jaw, with two rows of teeth.
+  s.box(-3, 3, 33, 34, 0, 4, 'bone');
+  for (let x = -3; x <= 3; x++) {
+    s.set(x, 35, 4, x % 2 === 0 ? BONE[2] : SOCKET);
+    s.set(x, 36, 4, x % 2 === 0 ? SOCKET : BONE[2]);
+  }
   return { body: s, eyes };
 }
 
-/** Upper arm, elbow, forearm and hand hanging from the pivot (shoulder at 0,0,0). */
-function armBones(s: Shape, side: number): void {
-  for (let y = -1; y >= -6; y--) s.set(0, y, 0, boneAt(side * 5, y, 0));
-  s.set(0, -7, 0, BONE_DARK);
-  for (let y = -8; y >= -13; y--) s.set(0, y, 0, boneAt(side * 5, y, 1));
-  s.box(0, 0, -15, -14, -1, 1, LEATHER); // gripping hand, wrapped
+/** Upper arm, elbow, forearm bones and a wrapped fist hanging from the pivot (the shoulder at 0,0,0). */
+function armBones(s: Shape, side: 1 | -1): void {
+  const inward = -side;
+  s.box(0, inward, -1, -7, 0, 1, 'bone');
+  s.box(side, 2 * inward, -8, -8, 0, 1, BONE_DARK);
+  s.box(0, 0, -9, -15, 0, 0, 'bone');
+  s.box(inward, inward, -9, -15, 1, 1, 'bone');
+  s.box(0, inward, -16, -18, -1, 2, LEATHER);
 }
 
 function warrior(): VoxelModel {
   const { body, eyes } = skeleton(-1);
-  // Helmet: rusted dome with a rim and a nose guard.
-  for (let y = 33; y <= 36; y++)
-    for (let z = -4; z <= 3; z++)
-      for (let x = -4; x <= 4; x++) {
-        const r = Math.hypot(x / 4.2, (z + 0.5) / 4, (y - 32) / 4.6);
-        if (r > 1 || r < 0.72) continue;
-        body.set(x, y, z, (x + z) % 3 === 0 ? RUST : IRON);
+  // Horned helmet with a rim, cheek guards and a nose guard.
+  body.ellipsoid(0, 42, -0.3, 5.9, 4.6, 5.9, IRON, 0.25);
+  for (let y = 38; y <= 41; y++) body.clear(0, y, 6);
+  for (let x = -5; x <= 5; x++) for (const z of [-5, 5]) body.set(x, 41, z, RUST);
+  for (const x of [-6, 6]) {
+    body.box(x, x, 41, 41, -5, 5, RUST);
+    body.box(x, x, 36, 40, 1, 4, IRON);
+    body.set(x, 39, 2, BRASS);
+  }
+  body.box(0, 0, 37, 42, 6, 6, RUST);
+  for (const hx of [-1, 1]) {
+    for (const [px, py] of [
+      [6, 44],
+      [7, 45],
+      [8, 46],
+      [8, 47],
+      [9, 48],
+      [9, 49],
+    ] as const)
+      body.box(hx * px, hx * px, py, py, -1, 0, BONE_DARK);
+    body.set(hx * 9, 50, -1, BONE[2]);
+  }
+  // Pauldron with rivets on the sword shoulder.
+  body.ellipsoid(7.5, 32.5, 0.5, 3, 2.4, 3.4, IRON, 0.45);
+  for (const z of [-2, 1, 3]) body.set(10, 32, z, BRASS);
+  // Greaves on both shins.
+  for (const [gx0, gx1] of [
+    [2, 3],
+    [-2, -3],
+  ] as const) {
+    body.box(gx0, gx1, 3, 10, 2, 2, IRON);
+    body.box(gx0, gx1, 9, 9, 2, 2, RUST);
+  }
+  // Belt with a buckle, and a ragged red loincloth front and back.
+  body.ellipsoid(0, 21.5, 0, 6.2, 1.2, 3.8, LEATHER, 0.35);
+  body.box(-1, 1, 21, 22, 4, 4, BRASS);
+  for (const lz of [4, -4]) {
+    for (let y = 12; y <= 20; y++)
+      for (let x = -3; x <= 3; x++) {
+        if (y < 15 && hash3(x, y, lz) < 0.25 + (15 - y) * 0.2) continue;
+        body.set(x, y, lz, (x + y) % 4 === 0 ? CLOTH_DARK : CLOTH);
       }
-  for (let x = -4; x <= 4; x++) for (const z of [-4, 3]) body.set(x, 32, z, IRON);
-  for (let z = -3; z <= 2; z++) for (const x of [-4, 4]) body.set(x, 32, z, IRON);
-  body.box(0, 0, 28, 32, 4, 4, RUST);
-  // Pauldron on the sword shoulder.
-  body.box(4, 7, 25, 26, -2, 2, IRON);
-  body.box(5, 7, 24, 24, -2, 2, RUST);
-  // Round shield on the left forearm: planks, iron rim, central boss.
-  for (let y = 9; y <= 22; y++)
-    for (let z = -6; z <= 8; z++) {
-      const r = Math.hypot(y - 15.5, z - 1);
-      if (r > 6.8) continue;
-      const c = r > 5.9 ? IRON : r < 1.6 ? RUST : Math.floor(z + 20) % 3 === 0 ? WOOD_DARK : WOOD;
-      body.set(-7, y, z, c);
-      if (r < 1.2) body.set(-8, y, z, IRON);
+  }
+  // Big round shield on the left arm: planks, a red band, iron rim, brass boss.
+  for (let y = 12; y <= 30; y++)
+    for (let z = -8; z <= 10; z++) {
+      const r = Math.hypot(y - 21, z - 1);
+      if (r > 8.6) continue;
+      const band = Math.abs(y - 21 - (z - 1)) <= 1.2;
+      const c = r > 7.6 ? IRON : r < 1.8 ? BRASS : band ? CLOTH : Math.floor(z + 20) % 3 === 0 ? WOOD_DARK : WOOD;
+      body.set(-9, y, z, c);
+      if (r > 7.6) body.set(-8, y, z, IRON);
+      if (r < 1.4) body.set(-10, y, z, BRASS);
     }
-  // Sword arm: bones, crossguard, grip, long blade with a bright edge.
+  // Sword arm: bones, fist, crossguard, broad blade with bright edges and a dark fuller.
   const arm = new Shape();
   armBones(arm, 1);
-  arm.box(0, 0, -16, -16, -3, 3, IRON);
-  arm.set(0, -16, -4, RUST);
-  arm.set(0, -16, 4, RUST);
-  for (let y = -17; y >= -33; y--) {
-    arm.set(0, y, 0, STEEL);
-    arm.set(0, y, 1, y < -31 ? STEEL_EDGE : STEEL);
-    arm.set(0, y, -1, STEEL_EDGE);
+  arm.box(0, -1, -19, -19, -4, 5, IRON);
+  for (const z of [-5, 6]) arm.box(0, -1, -19, -20, z, z, BRASS);
+  for (let y = -20; y >= -40; y--) {
+    const tip = y <= -38;
+    arm.box(0, -1, y, y, tip ? 0 : -1, tip ? 1 : 2, STEEL);
+    if (!tip) {
+      arm.box(0, -1, y, y, -1, -1, STEEL_EDGE);
+      arm.box(0, -1, y, y, 2, 2, STEEL_EDGE);
+      if (y > -34) arm.box(0, -1, y, y, 0, 0, IRON);
+    }
   }
-  arm.clear(0, -33, 1);
-  arm.clear(0, -33, -1);
+  arm.box(0, -1, -41, -41, 0, 1, STEEL_EDGE);
   return {
     voxel: VOXEL,
     palette: PALETTE,
     body: body.voxels(),
-    arm: { pivot: [5, 25, 0], voxels: arm.voxels() },
+    arm: { pivot: [7, 32, 0], voxels: arm.voxels() },
     eyes,
     // Guard stance with the blade forward-down, sword raised overhead, chop through to the front.
     poses: { idle: -0.9, windup: -2.8, strike: -0.55 },
@@ -222,54 +287,64 @@ function warrior(): VoxelModel {
 
 function archer(): VoxelModel {
   const { body, eyes } = skeleton(1);
-  // Hood: a cloth shell around the skull, open at the face, with a point at the back.
-  for (let y = 27; y <= 36; y++)
-    for (let z = -5; z <= 3; z++)
-      for (let x = -5; x <= 5; x++) {
-        const r = Math.hypot(x / 4.6, (z + 0.6) / 4.4, (y - 31.5) / 4.8);
-        if (r > 1 || r < 0.8) continue;
-        if (z >= 2 && y <= 33 && Math.abs(x) <= 3) continue; // face opening
-        body.set(x, y, z, y > 34 ? CLOTH_DARK : CLOTH);
-      }
-  body.box(-1, 1, 35, 37, -5, -4, CLOTH_DARK);
-  // Cape from the shoulders, widening down the back, with a ragged hem.
-  for (let y = 8; y <= 26; y++) {
-    const half = 4 + Math.floor((26 - y) / 5);
+  // Hood around the skull, open at the face, with a point at the back.
+  body.ellipsoid(0, 41.5, -0.6, 6.2, 6, 6.2, CLOTH, 0.22);
+  for (let y = 33; y <= 42; y++) for (let x = -4; x <= 4; x++) for (let z = 3; z <= 6; z++) body.clear(x, y, z);
+  body.box(-1, 1, 46, 48, -6, -5, CLOTH_DARK);
+  body.set(0, 49, -7, CLOTH_DARK);
+  // Mantle over the shoulders.
+  body.ellipsoid(0, 31, -0.5, 8.4, 3.2, 5, CLOTH_DARK, 0.3);
+  for (let y = 29; y <= 34; y++) for (let x = -2; x <= 2; x++) body.clear(x, y, 4);
+  // Cape down the back, widening, with a ragged hem.
+  for (let y = 9; y <= 31; y++) {
+    const half = 5 + Math.floor((31 - y) / 6);
     for (let x = -half; x <= half; x++) {
-      if (y < 12 && hash3(x, y, 9) < 0.35 + (12 - y) * 0.12) continue;
-      body.set(x, y, -4, (x + y) % 5 === 0 ? CLOTH_DARK : CLOTH);
+      if (y < 14 && hash3(x, y, 9) < 0.3 + (14 - y) * 0.13) continue;
+      body.set(x, y, -5, (x * 3 + y) % 7 === 0 ? CLOTH_DARK : CLOTH);
     }
   }
-  // Quiver slung across the back with arrow fletchings.
-  for (let y = 15; y <= 27; y++) {
-    const qx = 1 + Math.floor((y - 15) / 4);
-    body.box(qx, qx + 1, y, y, -6, -5, LEATHER);
+  // Quiver across the back, arrows with fletchings.
+  for (let y = 18; y <= 33; y++) {
+    const qx = 1 + Math.floor((y - 18) / 4);
+    body.box(qx, qx + 2, y, y, -8, -6, (y + qx) % 5 === 0 ? BRASS : LEATHER);
   }
   for (const [fx, fy] of [
-    [4, 28],
-    [5, 29],
-    [3, 29],
-    [4, 30],
+    [5, 34],
+    [6, 35],
+    [4, 35],
+    [5, 36],
+    [7, 36],
+    [6, 37],
   ] as const)
-    body.set(fx, fy, -5, FEATHER);
-  // Bow arm: the bow lies across the hand (along local Z), so it stands upright when the arm points forward.
+    body.set(fx, fy, -7, FEATHER);
+  // Belt with a pouch, dark loincloth, bracer on the static forearm.
+  body.ellipsoid(0, 21.5, 0, 6.2, 1.2, 3.8, LEATHER, 0.35);
+  body.box(3, 5, 17, 20, 3, 4, LEATHER);
+  body.set(4, 20, 5, BRASS);
+  for (let y = 13; y <= 20; y++)
+    for (let x = -3; x <= 2; x++) {
+      if (y < 16 && hash3(x, y, 2) < 0.3 + (16 - y) * 0.2) continue;
+      body.set(x, y, 4, CLOTH_DARK);
+    }
+  body.box(6, 7, 18, 22, -1, 2, LEATHER);
+  // Bow arm: the bow lies across the fist (along local Z), so it stands upright when the arm points forward.
   const arm = new Shape();
   armBones(arm, -1);
-  for (let z = -13; z <= 13; z++) {
-    const bend = Math.round(3 * (1 - (z / 13) ** 2));
-    const c = Math.abs(z) <= 1 ? LEATHER : Math.abs(z) > 11 ? WOOD_DARK : WOOD;
-    arm.set(0, -14 - bend, z, c);
-    if (Math.abs(z) < 4) arm.set(0, -15 - bend, z, c); // thicker grip
-    if (bend > 0 && Math.abs(z) < 13) arm.set(0, -14, z, STRING);
+  for (let z = -18; z <= 18; z++) {
+    const bend = Math.round(4 * (1 - (z / 18) ** 2));
+    const c = Math.abs(z) <= 2 ? LEATHER : Math.abs(z) > 15 ? WOOD_DARK : WOOD;
+    arm.box(0, 1, -17 - bend, -17 - bend, z, z, c);
+    if (Math.abs(z) < 12) arm.box(0, 1, -18 - bend, -18 - bend, z, z, c); // thicker limbs
+    if (bend > 0 && !arm.has(0, -17, z)) arm.set(0, -17, z, STRING);
   }
   return {
     voxel: VOXEL,
     palette: PALETTE,
     body: body.voxels(),
-    arm: { pivot: [-5, 25, 0], voxels: arm.voxels() },
+    arm: { pivot: [-7, 32, 0], voxels: arm.voxels() },
     eyes,
-    // Bow low at the side, raised and aimed, small recoil after the shot.
-    poses: { idle: -0.35, windup: -1.57, strike: -1.35 },
+    // Bow held low and tilted, raised and aimed, small recoil after the shot.
+    poses: { idle: -0.85, windup: -1.57, strike: -1.35 },
   };
 }
 
