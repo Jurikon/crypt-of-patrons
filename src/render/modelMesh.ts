@@ -5,7 +5,7 @@ import { createVolume, greedyMesh, setVoxel } from './voxel/mesher';
 import type { ModelVoxel, VoxelModel } from './voxel/models';
 
 /** Outline shell thickness: each surface voxel gets a dark back-faced cube this much larger. */
-const OUTLINE_SCALE = 1.32;
+const OUTLINE_SCALE = 1.16;
 
 export interface PartGeometry {
   readonly mesh: THREE.BufferGeometry;

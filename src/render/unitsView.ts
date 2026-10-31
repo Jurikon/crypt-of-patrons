@@ -70,7 +70,7 @@ export interface UnitVisual {
   rig: Rig | null;
 }
 
-const outlineMaterial = new THREE.MeshBasicMaterial({ color: 0x0c0203, side: THREE.BackSide });
+const outlineMaterial = new THREE.MeshBasicMaterial({ color: 0x2a0a08, side: THREE.BackSide });
 const eyeMaterial = new THREE.MeshBasicMaterial({ color: new THREE.Color(3.2, 0.75, 0.12) });
 
 export class UnitsView {
