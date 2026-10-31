@@ -247,6 +247,7 @@ export const MODIFIERS: readonly RuleDef[] = [
   {
     id: 'mod.explodingSummons',
     nameKey: 'modifier.explodingSummons',
+    requires: ['summon'],
     stats: [],
     triggers: [
       {
@@ -259,18 +260,21 @@ export const MODIFIERS: readonly RuleDef[] = [
   {
     id: 'mod.longPush',
     nameKey: 'modifier.longPush',
+    requires: ['push'],
     stats: [{ stat: 'pushDistance', add: 1 }],
     triggers: [],
   },
   {
     id: 'mod.piercing',
     nameKey: 'modifier.piercing',
+    requires: ['projectile'],
     stats: [{ stat: 'projectilePierce', add: 1 }],
     triggers: [],
   },
   {
     id: 'mod.trailTraps',
     nameKey: 'modifier.trailTraps',
+    requires: ['movement'],
     stats: [],
     triggers: [
       { on: 'moved', actor: 'owner', tags: ['movement'], effects: [{ kind: 'surface', surface: 'trap', at: 'from' }] },
@@ -279,12 +283,14 @@ export const MODIFIERS: readonly RuleDef[] = [
   {
     id: 'mod.markedKill',
     nameKey: 'modifier.markedKill',
+    requiresStatus: 'mark',
     stats: [],
     triggers: [{ on: 'kill', actor: 'owner', subjectStatus: 'mark', effects: [{ kind: 'freeAction' }] }],
   },
   {
     id: 'mod.fireTrail',
     nameKey: 'modifier.fireTrail',
+    requires: ['movement'],
     stats: [],
     triggers: [
       {
@@ -298,6 +304,7 @@ export const MODIFIERS: readonly RuleDef[] = [
   {
     id: 'mod.bloodyPush',
     nameKey: 'modifier.bloodyPush',
+    requires: ['push'],
     stats: [],
     triggers: [
       {
@@ -323,6 +330,7 @@ export const MODIFIERS: readonly RuleDef[] = [
   {
     id: 'mod.venomShots',
     nameKey: 'modifier.venomShots',
+    requires: ['projectile'],
     stats: [],
     triggers: [
       {
@@ -336,6 +344,7 @@ export const MODIFIERS: readonly RuleDef[] = [
   {
     id: 'mod.iceStep',
     nameKey: 'modifier.iceStep',
+    requires: ['movement'],
     stats: [],
     triggers: [
       {
@@ -349,6 +358,7 @@ export const MODIFIERS: readonly RuleDef[] = [
   {
     id: 'mod.stunBreaker',
     nameKey: 'modifier.stunBreaker',
+    requiresStatus: 'stun',
     stats: [],
     triggers: [
       {
@@ -362,6 +372,7 @@ export const MODIFIERS: readonly RuleDef[] = [
   {
     id: 'mod.vengefulDead',
     nameKey: 'modifier.vengefulDead',
+    requires: ['summon'],
     stats: [],
     triggers: [
       {
@@ -375,6 +386,7 @@ export const MODIFIERS: readonly RuleDef[] = [
   {
     id: 'mod.greedyDead',
     nameKey: 'modifier.greedyDead',
+    requires: ['summon'],
     stats: [],
     triggers: [{ on: 'kill', actor: 'ownSummon', effects: [{ kind: 'heal', amount: 1, to: { kind: 'actor' } }] }],
   },
@@ -391,7 +403,13 @@ export const MODIFIERS: readonly RuleDef[] = [
       },
     ],
   },
-  { id: 'mod.longReach', nameKey: 'modifier.longReach', stats: [{ stat: 'projectileRange', add: 2 }], triggers: [] },
+  {
+    id: 'mod.longReach',
+    nameKey: 'modifier.longReach',
+    stats: [{ stat: 'projectileRange', add: 2 }],
+    triggers: [],
+    requires: ['projectile'],
+  },
   {
     id: 'mod.throughStrike',
     nameKey: 'modifier.throughStrike',
@@ -403,6 +421,7 @@ export const MODIFIERS: readonly RuleDef[] = [
   {
     id: 'mod.heavyPushes',
     nameKey: 'modifier.heavyPushes',
+    requires: ['push'],
     stats: [],
     triggers: [
       {
@@ -415,6 +434,7 @@ export const MODIFIERS: readonly RuleDef[] = [
   {
     id: 'mod.shadowAfterShadow',
     nameKey: 'modifier.shadowAfterShadow',
+    requires: ['movement'],
     stats: [],
     triggers: [{ on: 'moved', actor: 'owner', tags: ['movement'], effects: [{ kind: 'cooldowns', delta: -1 }] }],
   },
@@ -441,6 +461,7 @@ export const MODIFIERS: readonly RuleDef[] = [
   {
     id: 'mod.contagion',
     nameKey: 'modifier.contagion',
+    requiresStatus: 'poison',
     stats: [],
     triggers: [
       {
@@ -462,6 +483,7 @@ export const MODIFIERS: readonly RuleDef[] = [
   {
     id: 'mod.hotBlood',
     nameKey: 'modifier.hotBlood',
+    requiresStatus: 'burning',
     stats: [],
     triggers: [
       {
@@ -475,6 +497,7 @@ export const MODIFIERS: readonly RuleDef[] = [
   {
     id: 'mod.boneShards',
     nameKey: 'modifier.boneShards',
+    requires: ['summon'],
     stats: [],
     triggers: [
       {
@@ -503,7 +526,13 @@ export const MODIFIERS: readonly RuleDef[] = [
       },
     ],
   },
-  { id: 'mod.doubleSummon', nameKey: 'modifier.doubleSummon', stats: [{ stat: 'extraSummons', add: 1 }], triggers: [] },
+  {
+    id: 'mod.doubleSummon',
+    nameKey: 'modifier.doubleSummon',
+    stats: [{ stat: 'extraSummons', add: 1 }],
+    triggers: [],
+    requires: ['summon'],
+  },
 ];
 
 export const STATUSES: readonly StatusDef[] = [
@@ -653,6 +682,7 @@ export const ITEMS: readonly RuleDef[] = [
   {
     id: 'item.lichCrown',
     nameKey: 'item.lichCrown',
+    requires: ['summon'],
     icon: '♛',
     stats: [{ stat: 'summonsUseBaseAttack', add: 1 }],
     triggers: [],
@@ -673,6 +703,7 @@ export const ITEMS: readonly RuleDef[] = [
   {
     id: 'item.jailerChains',
     nameKey: 'item.jailerChains',
+    requires: ['push'],
     icon: '⛓',
     stats: [],
     triggers: [
@@ -687,6 +718,7 @@ export const ITEMS: readonly RuleDef[] = [
   {
     id: 'item.mirrorDagger',
     nameKey: 'item.mirrorDagger',
+    requires: ['movement'],
     icon: '🗡',
     stats: [],
     triggers: [
@@ -787,6 +819,7 @@ export const ITEMS: readonly RuleDef[] = [
   {
     id: 'item.bannerScrap',
     nameKey: 'item.bannerScrap',
+    requires: ['summon'],
     icon: '🚩',
     stats: [{ stat: 'auraDamage', add: 1 }],
     triggers: [],
@@ -794,6 +827,7 @@ export const ITEMS: readonly RuleDef[] = [
   {
     id: 'item.judgeEye',
     nameKey: 'item.judgeEye',
+    requiresStatus: 'mark',
     icon: '👁',
     cursed: true,
     stats: [{ stat: 'damageTaken', add: 1 }],

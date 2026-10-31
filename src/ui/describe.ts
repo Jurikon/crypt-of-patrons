@@ -9,7 +9,7 @@ import {
   type TriggerDef,
   type UnitSelector,
 } from '../content';
-import { t, type TextKey } from '../i18n';
+import { hasText, t, type TextKey } from '../i18n';
 
 /**
  * Descriptions are built from the data (GDD 3), never written by hand, so a new ability, status or
@@ -117,10 +117,10 @@ export function abilityName(a: AbilityDef): string {
 }
 
 function describeTrigger(tr: TriggerDef): string {
-  const party = tr.actor ?? tr.subject ?? 'any';
-  const key = `when.${tr.on}.${party}` as TextKey;
-  let when = t(key);
-  if (when === key) when = t(`when.${tr.on}` as TextKey);
+  // The most specific phrase there is: by subject (who it happens to), then by actor, then generic.
+  const keys = [`when.${tr.on}.${tr.subject}`, `when.${tr.on}.${tr.actor}`, `when.${tr.on}`];
+  const key = keys.find(hasText) ?? 'when.generic';
+  let when = t(key as TextKey);
   if (tr.tags?.length) when += ` (${tr.tags.map((tag) => t(`tag.${tag}` as TextKey)).join(', ')})`;
   if (tr.subjectStatus) when += ` ${t('desc.withStatus', { status: name(getStatus(tr.subjectStatus).nameKey) })}`;
   if (tr.backstab) when += ` ${t('desc.fromBehind')}`;

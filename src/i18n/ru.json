@@ -296,5 +296,6 @@
   "hud.items": "Предметы",
   "debug.items": "Предметы",
   "debug.addClass": "Добавить класс",
-  "reject.cannot_retreat": "Клятва запрещает отступать"
+  "reject.cannot_retreat": "Клятва запрещает отступать",
+  "when.generic": "Когда это происходит"
 }

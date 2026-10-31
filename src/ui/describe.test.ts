@@ -5,7 +5,7 @@ import ru from '../i18n/ru.json';
 import { setLang } from '../i18n';
 import { describeAbility, describeRule } from './describe';
 
-const RAW = /\b(desc|when|stat|effect|target|tag|status|surface|summon)\.[a-zA-Z.]+/;
+const RAW = /\b(desc|when|stat|effect|target|tag|status|surface|summon)\.[a-zA-Z.]+|undefined|NaN/;
 
 describe('generated descriptions', () => {
   it('every content name exists in English and Russian', () => {

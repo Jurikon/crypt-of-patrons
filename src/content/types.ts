@@ -230,6 +230,10 @@ export interface RuleDef {
   readonly icon?: string;
   /** Items: a strong upside with a real downside. */
   readonly cursed?: boolean;
+  /** Only offered when the hero has (or can still get) an ability with one of these tags. */
+  readonly requires?: readonly Tag[];
+  /** Only offered when the hero has some way to put this status on enemies. */
+  readonly requiresStatus?: string;
 }
 
 /** Two classes together become a hybrid with its own name and feature (an idea of the owner, M4). */

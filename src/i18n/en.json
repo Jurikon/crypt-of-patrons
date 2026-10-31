@@ -296,5 +296,6 @@
   "hud.items": "Items",
   "debug.items": "Items",
   "debug.addClass": "Add class",
-  "reject.cannot_retreat": "Your oath forbids stepping back"
+  "reject.cannot_retreat": "Your oath forbids stepping back",
+  "when.generic": "When it happens"
 }

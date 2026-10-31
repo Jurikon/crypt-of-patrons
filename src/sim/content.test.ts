@@ -561,3 +561,31 @@ describe('Initiation and hybrids', () => {
     expect(of(r.events, 'statusApplied').some((e) => e.type === 'statusApplied' && e.status === 'stun')).toBe(true);
   });
 });
+
+describe('rewards fit the build', () => {
+  const offered = (classId: string, extraClass?: string) => {
+    const seen = new Set<string>();
+    for (let seed = 1; seed <= 40; seed++) {
+      let s = createGame(seed, { classId });
+      if (extraClass) s = apply(s, { type: 'debugClass', playerId: 'p1', classId: extraClass }).state;
+      enterRoom(s, 2, 'combat', 'modifier', []);
+      s = apply(s, { type: 'debug', playerId: 'p1', action: 'killAll' }).state;
+      for (const o of s.run!.offer) if (o.kind === 'modifier') seen.add(o.id);
+    }
+    return seen;
+  };
+
+  it('a Knight is never offered projectile or summon modifiers', () => {
+    const seen = offered('knight');
+    for (const id of ['mod.longReach', 'mod.piercing', 'mod.venomShots', 'mod.doubleSummon', 'mod.vengefulDead'])
+      expect(seen.has(id), id).toBe(false);
+    expect(seen.has('mod.longPush')).toBe(true);
+  });
+
+  it('after Initiation into Necromancer, summon modifiers show up for the Knight', () => {
+    const seen = offered('knight', 'necromancer');
+    expect(
+      ['mod.doubleSummon', 'mod.vengefulDead', 'mod.boneShards', 'mod.greedyDead'].some((id) => seen.has(id)),
+    ).toBe(true);
+  });
+});

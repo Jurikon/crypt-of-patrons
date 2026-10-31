@@ -13,10 +13,11 @@ import {
   MODIFIERS,
   type EffectSpec,
   type RewardKind,
+  type RuleDef,
 } from '../content';
 import type { GameEvent, RejectReason } from './commands';
 import { gainRule, type Engine } from './engine';
-import { statOf } from './units';
+import { playerRules, statOf } from './units';
 import {
   populateRoom,
   roomFor,
@@ -40,8 +41,47 @@ function newAbilities(p: Player): string[] {
   return [...new Set(ids)].filter((id) => !p.abilities.includes(id));
 }
 
-const newModifiers = (p: Player) => MODIFIERS.map((m) => m.id).filter((id) => !p.modifiers.includes(id));
-const newItems = (p: Player) => ITEMS.map((i) => i.id).filter((id) => !p.items.includes(id));
+/** Abilities the hero has or can still be offered (pools of their classes). */
+function reachableAbilities(p: Player): string[] {
+  return [...new Set([...p.abilities, ...p.classes.flatMap((c) => [...getClass(c).abilities, ...getClass(c).pool])])];
+}
+
+/** Every effect the hero's abilities and rules can produce, nested ones included. */
+function heroEffects(p: Player): EffectSpec[] {
+  const out: EffectSpec[] = [];
+  const walk = (effects: readonly EffectSpec[]) => {
+    for (const e of effects) {
+      out.push(e);
+      if (e.kind === 'projectile') walk(e.onHit);
+      if (e.kind === 'dash') walk(e.onImpact);
+    }
+  };
+  for (const id of reachableAbilities(p)) walk(getAbility(id).effects);
+  for (const r of playerRules(p)) {
+    walk(r.onGain ?? []);
+    for (const t of r.triggers) walk(t.effects);
+  }
+  return out;
+}
+
+/**
+ * A modifier or item is worth offering only if it can do something for this hero: an ability with a
+ * tag it needs (or a rule that summons, for summon rules), or a way to apply the status it feeds on.
+ */
+function fits(p: Player, rule: RuleDef): boolean {
+  const effects = heroEffects(p);
+  if (rule.requires) {
+    const tags = new Set(reachableAbilities(p).flatMap((id) => getAbility(id).tags));
+    if (effects.some((e) => e.kind === 'summon')) tags.add('summon');
+    if (!rule.requires.some((t) => tags.has(t))) return false;
+  }
+  if (rule.requiresStatus && !effects.some((e) => e.kind === 'status' && e.status === rule.requiresStatus))
+    return false;
+  return true;
+}
+
+const newModifiers = (p: Player) => MODIFIERS.filter((m) => !p.modifiers.includes(m.id) && fits(p, m)).map((m) => m.id);
+const newItems = (p: Player) => ITEMS.filter((i) => !p.items.includes(i.id) && fits(p, i)).map((i) => i.id);
 const otherClasses = (p: Player) => CLASSES.map((c) => c.id).filter((id) => !p.classes.includes(id));
 
 /**

@@ -26,6 +26,11 @@ export function getLang(): Lang {
   return current;
 }
 
+/** True if a key exists (in English, which every key must have). */
+export function hasText(key: string): key is TextKey {
+  return key in en;
+}
+
 /** Looks up a player-facing string. `{name}` placeholders are filled from `params`. */
 export function t(key: TextKey, params?: Record<string, string | number>): string {
   const text = TABLES[current][key] ?? en[key];
