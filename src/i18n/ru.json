@@ -1,0 +1,23 @@
+{
+  "game.title": "Crypt of Patrons",
+  "prompt.clickToPlay": "Кликни, чтобы играть",
+  "prompt.controls": "WASD — шаг · Q/E — поворот · Мышь — обзор · Tab — вид сверху · ` — отладка",
+  "debug.title": "Отладка",
+  "debug.seed": "Сид",
+  "debug.fps": "FPS",
+  "debug.position": "Позиция",
+  "debug.direction": "Направление",
+  "debug.shape": "Комната",
+  "debug.newSeed": "Новый сид (R)",
+  "debug.copyState": "Скопировать состояние",
+  "debug.copied": "Скопировано!",
+  "dir.0": "Север",
+  "dir.1": "Восток",
+  "dir.2": "Юг",
+  "dir.3": "Запад",
+  "shape.rect": "Прямоугольник",
+  "shape.cross": "Крест",
+  "shape.l": "Буква L",
+  "shape.chamfer": "Срезанные углы",
+  "error.webgl": "В этом браузере недоступен WebGL. Попробуй другой браузер или включи аппаратное ускорение."
+}

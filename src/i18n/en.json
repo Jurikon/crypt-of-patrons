@@ -1,0 +1,23 @@
+{
+  "game.title": "Crypt of Patrons",
+  "prompt.clickToPlay": "Click to play",
+  "prompt.controls": "WASD — step · Q/E — turn · Mouse — look · Tab — top view · ` — debug",
+  "debug.title": "Debug",
+  "debug.seed": "Seed",
+  "debug.fps": "FPS",
+  "debug.position": "Position",
+  "debug.direction": "Facing",
+  "debug.shape": "Room",
+  "debug.newSeed": "New seed (R)",
+  "debug.copyState": "Copy state",
+  "debug.copied": "Copied!",
+  "dir.0": "North",
+  "dir.1": "East",
+  "dir.2": "South",
+  "dir.3": "West",
+  "shape.rect": "Rectangle",
+  "shape.cross": "Cross",
+  "shape.l": "L-shape",
+  "shape.chamfer": "Cut corners",
+  "error.webgl": "WebGL is not available in this browser. Try another browser or enable hardware acceleration."
+}
