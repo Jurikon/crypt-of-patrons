@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
-import type { GameState } from '../sim';
+import type { RejectReason, GameState, Preview } from '../sim';
+import type { FrameLabels } from '../render/renderer';
 
 /** What the HTML layer shows. The game state here is read-only for the UI. */
 export interface ViewState {
@@ -8,6 +9,18 @@ export interface ViewState {
   readonly debugOpen: boolean;
   readonly pointerLocked: boolean;
   readonly topView: boolean;
+  /** Ability chosen and waiting for confirmation. */
+  readonly selected: string | null;
+  readonly preview: Preview | null;
+  /** True while events are still animating (enemy phase, pushes…). */
+  readonly busy: boolean;
+  readonly canUndo: boolean;
+  /** Last rejected command, shown briefly. */
+  readonly notice: { readonly reason: RejectReason; readonly at: number } | null;
+  /** Time of the last hit on the player, for the red screen flash. */
+  readonly hitAt: number;
+  /** Player health as currently animated; null = use the real value. */
+  readonly shownHp: number | null;
 }
 
 export interface Store<T> {
@@ -37,3 +50,6 @@ export function useStore<T>(store: Store<T>): T {
   useEffect(() => store.subscribe(setValue), [store]);
   return value;
 }
+
+/** Per-frame overlay data lives in its own store so the HUD does not re-render every frame. */
+export type LabelsStore = Store<{ labels: FrameLabels | null }>;

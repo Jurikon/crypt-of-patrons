@@ -8,6 +8,8 @@ const STEP_MS = 150;
 const TURN_MS = 150;
 const BUMP_MS = 160;
 const TOP_MS = 320;
+const HIT_MS = 260;
+const DEATH_MS = 700;
 const BOB_AMPLITUDE = 0.06;
 const BUMP_DISTANCE = 0.22;
 const LOOK_YAW_LIMIT = THREE.MathUtils.degToRad(70);
@@ -40,6 +42,8 @@ export class CameraRig {
   private pos: Tween<THREE.Vector3>;
   private yaw: Tween<number>;
   private bump: { dir: THREE.Vector3; start: number } | null = null;
+  private hitStart = -1e9;
+  private deathStart: number | null = null;
   private lookYaw = 0;
   private lookPitch = 0;
   private topTarget = 0;
@@ -83,6 +87,8 @@ export class CameraRig {
     const yaw = yawFor(player.dir);
     this.yaw = { from: yaw, to: yaw, start: now, duration: TURN_MS };
     this.bump = null;
+    this.hitStart = -1e9;
+    this.deathStart = null;
     this.lookYaw = 0;
     this.lookPitch = 0;
     this.setRoom(room);
@@ -99,12 +105,20 @@ export class CameraRig {
         this.yaw = { from: this.currentYaw(now), to: this.yaw.to + delta, start: now, duration: TURN_MS };
         break;
       }
-      case 'bumped': {
-        const at = cellCenter(e.at);
+      case 'bumped':
+      case 'abilityUsed': {
+        // Walking into a wall and swinging at a cell share the same short lunge towards it.
+        const at = cellCenter(e.type === 'bumped' ? e.at : e.target);
         const dir = at.sub(this.pos.to).setY(0).normalize();
         this.bump = { dir, start: now };
         break;
       }
+      case 'damaged':
+        if (e.amount > 0) this.hitStart = now;
+        break;
+      case 'died':
+        this.deathStart = now;
+        break;
       default:
         break;
     }
@@ -158,8 +172,28 @@ export class CameraRig {
       }
     }
 
+    // Taking a hit: a short violent shake.
+    const ht = (now - this.hitStart) / HIT_MS;
+    if (ht >= 0 && ht < 1) {
+      const k = (1 - ht) * 0.07;
+      pos.x += Math.sin(now * 0.09) * k;
+      pos.y += Math.sin(now * 0.13) * k * 0.6;
+      shakeRoll += Math.sin(now * 0.07) * (1 - ht) * 0.05;
+    }
+
+    // Death: sink to the floor and tip over.
+    let deathPitch = 0;
+    if (this.deathStart !== null) {
+      const dt = easeOut(Math.min(1, (now - this.deathStart) / DEATH_MS));
+      pos.y = THREE.MathUtils.lerp(pos.y, 0.35, dt);
+      shakeRoll += dt * 0.6;
+      deathPitch = dt * 0.25;
+    }
+
     const yaw = this.currentYaw(now) + this.lookYaw;
-    const fpQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(this.lookPitch, yaw, shakeRoll, 'YXZ'));
+    const fpQuat = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(this.lookPitch + deathPitch, yaw, shakeRoll, 'YXZ'),
+    );
 
     // Blend towards the overhead pose.
     const tt = Math.min(1, (now - this.topStart) / TOP_MS);

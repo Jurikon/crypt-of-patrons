@@ -4,11 +4,18 @@ import { formatHash, parseHash, randomSeed } from './debug/url';
 import { detectLang, setLang, t } from './i18n';
 import { attachInput } from './input/input';
 import { GameRenderer } from './render/renderer';
-import { apply, createGame, type Command, type GameState } from './sim';
-import { App, ErrorScreen } from './ui/App';
-import { createStore, type ViewState } from './ui/store';
+import { add, dirVec } from './core/grid';
+import { apply, createGame, preview, type Command, type DebugAction, type GameState } from './sim';
+import { App, ErrorScreen, type AppActions } from './ui/App';
+import { createStore, type LabelsStore, type ViewState } from './ui/store';
 
 const PLAYER_ID = 'p1';
+
+/**
+ * Undo policy (ROADMAP M1, decision 3): steps can be undone freely until the first attack of the turn.
+ * Kept as a setting to revisit after playtests.
+ */
+const UNDO_POLICY: 'movesUntilAttack' | 'off' = 'movesUntilAttack';
 
 const lang = detectLang(navigator.languages ?? [navigator.language]);
 setLang(lang);
@@ -26,6 +33,9 @@ let state: GameState = createGame(seed);
 /** Every command since the room was created: seed + this list reproduces the session exactly. */
 let commands: Command[] = [];
 let buffered: Command | null = null;
+/** Snapshots before each step of the current player turn, for undo. */
+let undoStack: { state: GameState; commandCount: number }[] = [];
+let selected: string | null = null;
 
 let renderer: GameRenderer;
 try {
@@ -35,7 +45,8 @@ try {
   render(h(ErrorScreen, { message: t('error.webgl') }), uiEl);
   throw new Error('WebGL unavailable', { cause: err });
 }
-renderer.setState(state, performance.now());
+renderer.reset(state, performance.now());
+renderer.onPlayerHit = (hp, now) => store.set({ shownHp: hp, hitAt: now });
 
 const store = createStore<ViewState>({
   game: state,
@@ -43,14 +54,52 @@ const store = createStore<ViewState>({
   debugOpen: params.debug,
   pointerLocked: false,
   topView: false,
+  selected: null,
+  preview: null,
+  busy: false,
+  canUndo: false,
+  notice: null,
+  hitAt: -1e9,
+  shownHp: null,
 });
+const labels: LabelsStore = createStore({ labels: null });
+
+const player = () => state.players[0];
+
+/** Recomputes the ability preview: the same `apply` on the current state, nothing committed. */
+function refreshPreview(): void {
+  const p = player();
+  if (!selected || !p || state.combat.status !== 'active') {
+    renderer.setPreview(null, null);
+    store.set({ selected, preview: null });
+    return;
+  }
+  const pv = preview(state, { type: 'useAbility', playerId: PLAYER_ID, abilityId: selected });
+  renderer.setPreview(pv, add(p, dirVec(p.dir)));
+  store.set({ selected, preview: pv });
+}
 
 function run(command: Command, now: number): void {
+  const before = state;
   const result = apply(state, command);
+  const rejected = result.events.find((e) => e.type === 'rejected');
+  if (rejected && rejected.type === 'rejected') {
+    store.set({ notice: { reason: rejected.reason, at: now } });
+    return;
+  }
+  if (UNDO_POLICY !== 'off' && command.type === 'move' && result.events[0]?.type === 'moved') {
+    undoStack.push({ state: before, commandCount: commands.length });
+  }
+  if (command.type === 'useAbility' || command.type === 'endTurn' || command.type === 'debug') undoStack = [];
   state = result.state;
   commands.push(command);
-  renderer.onEvents(result.events, now);
-  store.set({ game: state });
+  renderer.play(result.events, state);
+  if (command.type === 'useAbility' || command.type === 'endTurn') selected = null;
+  // Keep showing the old health until the hit is actually animated.
+  if (command.type === 'endTurn') store.set({ shownHp: before.players[0]?.hp ?? null });
+  if (state.combat.status !== 'active' && document.pointerLockElement) document.exitPointerLock();
+  store.set({ game: state, canUndo: undoStack.length > 0 && !player()?.attackedThisTurn });
+  refreshPreview();
 }
 
 /** Commands arriving mid-animation are buffered (one at a time; the latest wins). */
@@ -60,13 +109,29 @@ function dispatch(command: Command): void {
   else run(command, now);
 }
 
+function undo(): void {
+  const now = performance.now();
+  if (renderer.isBusy(now) || player()?.attackedThisTurn) return;
+  const snap = undoStack.pop();
+  if (!snap) return;
+  state = snap.state;
+  commands = commands.slice(0, snap.commandCount);
+  buffered = null;
+  renderer.reset(state, now);
+  store.set({ game: state, canUndo: undoStack.length > 0 });
+  refreshPreview();
+}
+
 function loadSeed(next: number): void {
   seed = next;
   state = createGame(seed);
   commands = [];
   buffered = null;
-  renderer.setState(state, performance.now());
-  store.set({ game: state });
+  undoStack = [];
+  selected = null;
+  renderer.reset(state, performance.now());
+  store.set({ game: state, canUndo: false, notice: null });
+  refreshPreview();
 }
 
 function newSeed(): void {
@@ -75,15 +140,46 @@ function newSeed(): void {
   loadSeed(next);
 }
 
-const actions = {
+function selectAbility(slot: number): void {
+  const id = player()?.abilities[slot];
+  if (!id || state.combat.status !== 'active') return;
+  if (selected === id) {
+    confirm();
+    return;
+  }
+  selected = id;
+  refreshPreview();
+}
+
+function confirm(): void {
+  if (!selected) return;
+  dispatch({ type: 'useAbility', playerId: PLAYER_ID, abilityId: selected });
+}
+
+function cancel(): void {
+  selected = null;
+  refreshPreview();
+}
+
+const actions: AppActions = {
   newSeed,
   exportState: () => JSON.stringify({ seed, commands }),
+  cheat: (action: DebugAction) => dispatch({ type: 'debug', playerId: PLAYER_ID, action }),
+  selectAbility,
+  endTurn: () => dispatch({ type: 'endTurn', playerId: PLAYER_ID }),
+  undo,
+  retry: () => loadSeed(seed),
+  newRoom: newSeed,
 };
 
 attachInput(
   renderer.canvas,
   {
     command: dispatch,
+    selectAbility,
+    confirm,
+    cancel,
+    undo,
     topView: (held) => {
       renderer.setTopView(held, performance.now());
       store.set({ topView: held });
@@ -103,18 +199,24 @@ window.addEventListener('hashchange', () => {
 });
 window.addEventListener('resize', () => renderer.resize());
 
-render(h(App, { store, actions }), uiEl);
+render(h(App, { store, labels, actions }), uiEl);
 
 // Frame loop with an FPS counter refreshed twice a second.
 let frames = 0;
 let fpsWindowStart = performance.now();
+let wasBusy = false;
 function frame(now: number): void {
   if (buffered && !renderer.isBusy(now)) {
     const c = buffered;
     buffered = null;
     run(c, now);
   }
-  renderer.render(state, now);
+  labels.set({ labels: renderer.render(now) });
+  const busy = renderer.isBusy(now);
+  if (busy !== wasBusy) {
+    wasBusy = busy;
+    store.set(busy ? { busy } : { busy, shownHp: null });
+  }
   frames++;
   if (now - fpsWindowStart >= 500) {
     store.set({ fps: (frames * 1000) / (now - fpsWindowStart) });
@@ -129,4 +231,5 @@ requestAnimationFrame(frame);
 (window as unknown as { __cop: unknown }).__cop = {
   getState: () => state,
   getCommands: () => commands.slice(),
+  isBusy: () => renderer.isBusy(performance.now()),
 };

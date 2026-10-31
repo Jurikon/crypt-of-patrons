@@ -1,11 +1,14 @@
 import { useState } from 'preact/hooks';
 import { t, type TextKey } from '../i18n';
+import type { DebugAction } from '../sim';
 import type { ViewState } from '../ui/store';
 
 export interface OverlayActions {
   newSeed(): void;
   /** Returns the text for a bug report: seed plus the command list. */
   exportState(): string;
+  /** Debug cheats go through the simulation as commands, so bug reports replay exactly. */
+  cheat(action: DebugAction): void;
 }
 
 /** Debug overlay toggled with the backquote key. */
@@ -47,6 +50,19 @@ export function DebugOverlay({ view, actions }: { view: ViewState; actions: Over
         </button>
         <button type="button" onClick={copy}>
           {copied ? t('debug.copied') : t('debug.copyState')}
+        </button>
+      </div>
+      <div class="debug-buttons">
+        <button type="button" onClick={() => actions.cheat('killAll')} data-testid="kill-all">
+          {t('debug.killAll')}
+        </button>
+        <button type="button" onClick={() => actions.cheat('heal')}>
+          {t('debug.heal')}
+        </button>
+      </div>
+      <div class="debug-buttons">
+        <button type="button" onClick={() => actions.cheat('toggleGod')} data-testid="god">
+          {t('debug.god')}: {p?.god ? t('debug.on') : t('debug.off')}
         </button>
       </div>
     </div>

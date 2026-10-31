@@ -1,9 +1,14 @@
 import type { Command } from '../sim';
-import { actionToCommand, DEFAULT_BINDINGS, type Bindings } from './bindings';
+import { ABILITY_ACTIONS, actionToCommand, DEFAULT_BINDINGS, type Bindings } from './bindings';
 
 export interface InputHandlers {
   /** A game command for the simulation. Input never touches game state itself. */
   command(c: Command): void;
+  /** Ability slot (0-based) pressed: select it, or use it if already selected. */
+  selectAbility(slot: number): void;
+  confirm(): void;
+  cancel(): void;
+  undo(): void;
   topView(held: boolean): void;
   toggleDebug(): void;
   newSeed(): void;
@@ -30,13 +35,22 @@ export function attachInput(canvas: HTMLElement, handlers: InputHandlers, opts: 
     if (!action) return;
     e.preventDefault();
     const command = actionToCommand(action, opts.playerId);
-    if (command) {
-      // Holding a key repeats the command; the caller buffers one while an animation plays.
+    // Holding a movement key repeats it; the caller buffers one command while an animation plays.
+    if (command && (command.type === 'move' || command.type === 'turn')) {
       handlers.command(command);
       return;
     }
     if (e.repeat) return;
-    if (action === 'topView') handlers.topView(true);
+    if (command) {
+      handlers.command(command);
+      return;
+    }
+    const slot = ABILITY_ACTIONS.indexOf(action);
+    if (slot >= 0) handlers.selectAbility(slot);
+    else if (action === 'confirm') handlers.confirm();
+    else if (action === 'cancel') handlers.cancel();
+    else if (action === 'undo') handlers.undo();
+    else if (action === 'topView') handlers.topView(true);
     else if (action === 'toggleDebug') handlers.toggleDebug();
     else if (action === 'newSeed') handlers.newSeed();
   };
@@ -51,23 +65,33 @@ export function attachInput(canvas: HTMLElement, handlers: InputHandlers, opts: 
   // Losing focus while Tab is held must not leave the camera stuck overhead.
   const onBlur = () => handlers.topView(false);
 
-  const onClick = () => {
-    if (document.pointerLockElement !== canvas) {
-      // Some browsers reject the request (e.g. right after leaving lock); ignore it, the next click retries.
-      Promise.resolve(canvas.requestPointerLock()).catch(() => undefined);
+  const locked = () => document.pointerLockElement === canvas;
+
+  const onMouseDown = (e: MouseEvent) => {
+    if (!locked()) {
+      if (e.button === 0) {
+        // Some browsers reject the request (e.g. right after leaving lock); ignore it, the next click retries.
+        Promise.resolve(canvas.requestPointerLock()).catch(() => undefined);
+      }
+      return;
     }
+    if (e.button === 0) handlers.confirm();
+    else if (e.button === 2) handlers.cancel();
   };
+
+  const onContextMenu = (e: Event) => e.preventDefault();
 
   const onMouseMove = (e: MouseEvent) => {
-    if (document.pointerLockElement === canvas) handlers.look(e.movementX, e.movementY);
+    if (locked()) handlers.look(e.movementX, e.movementY);
   };
 
-  const onLockChange = () => handlers.pointerLockChanged(document.pointerLockElement === canvas);
+  const onLockChange = () => handlers.pointerLockChanged(locked());
 
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
   window.addEventListener('blur', onBlur);
-  canvas.addEventListener('click', onClick);
+  canvas.addEventListener('mousedown', onMouseDown);
+  canvas.addEventListener('contextmenu', onContextMenu);
   document.addEventListener('mousemove', onMouseMove);
   document.addEventListener('pointerlockchange', onLockChange);
 
@@ -75,7 +99,8 @@ export function attachInput(canvas: HTMLElement, handlers: InputHandlers, opts: 
     window.removeEventListener('keydown', onKeyDown);
     window.removeEventListener('keyup', onKeyUp);
     window.removeEventListener('blur', onBlur);
-    canvas.removeEventListener('click', onClick);
+    canvas.removeEventListener('mousedown', onMouseDown);
+    canvas.removeEventListener('contextmenu', onContextMenu);
     document.removeEventListener('mousemove', onMouseMove);
     document.removeEventListener('pointerlockchange', onLockChange);
   };

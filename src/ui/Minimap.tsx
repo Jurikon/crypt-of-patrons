@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'preact/hooks';
 import type { CellType } from '../core/grid';
-import type { GameState } from '../sim';
+import { getEnemy } from '../content';
+import { intentCells, type GameState } from '../sim';
 
 const CELL_PX = 9;
 
@@ -41,6 +42,19 @@ export function Minimap({ game }: { game: GameState }) {
           ctx.fill();
         }
       }
+    }
+    // Telegraphed attacks: red cells, like on the floor.
+    ctx.fillStyle = 'rgba(255, 50, 30, 0.55)';
+    for (const e of game.enemies) {
+      if (!e.intent) continue;
+      for (const c of intentCells(game, e, e.intent).cells)
+        ctx.fillRect(c.x * CELL_PX, c.y * CELL_PX, CELL_PX, CELL_PX);
+    }
+    for (const e of game.enemies) {
+      ctx.fillStyle = getEnemy(e.type).behavior.kind === 'ranged' ? '#e8a040' : '#e04030';
+      ctx.beginPath();
+      ctx.arc((e.x + 0.5) * CELL_PX, (e.y + 0.5) * CELL_PX, CELL_PX * 0.36, 0, Math.PI * 2);
+      ctx.fill();
     }
     for (const p of game.players) {
       const cx = (p.x + 0.5) * CELL_PX;

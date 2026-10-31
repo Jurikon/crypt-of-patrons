@@ -8,6 +8,14 @@ export type Action =
   | 'moveRight'
   | 'turnLeft'
   | 'turnRight'
+  | 'endTurn'
+  | 'ability1'
+  | 'ability2'
+  | 'ability3'
+  | 'ability4'
+  | 'confirm'
+  | 'cancel'
+  | 'undo'
   | 'topView'
   | 'toggleDebug'
   | 'newSeed';
@@ -26,10 +34,23 @@ export const DEFAULT_BINDINGS: Bindings = {
   ArrowLeft: 'turnLeft',
   KeyE: 'turnRight',
   ArrowRight: 'turnRight',
+  Space: 'endTurn',
+  Digit1: 'ability1',
+  Digit2: 'ability2',
+  Digit3: 'ability3',
+  Digit4: 'ability4',
+  KeyF: 'confirm',
+  Enter: 'confirm',
+  Escape: 'cancel',
+  KeyX: 'cancel',
+  KeyZ: 'undo',
+  Backspace: 'undo',
   Tab: 'topView',
   Backquote: 'toggleDebug',
   KeyR: 'newSeed',
 };
+
+export const ABILITY_ACTIONS: readonly Action[] = ['ability1', 'ability2', 'ability3', 'ability4'];
 
 export function actionToCommand(action: Action, playerId: string): Command | null {
   switch (action) {
@@ -45,6 +66,8 @@ export function actionToCommand(action: Action, playerId: string): Command | nul
       return { type: 'turn', playerId, dir: 'left' };
     case 'turnRight':
       return { type: 'turn', playerId, dir: 'right' };
+    case 'endTurn':
+      return { type: 'endTurn', playerId };
     default:
       return null;
   }
