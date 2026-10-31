@@ -11,6 +11,9 @@
   "debug.newSeed": "Новый сид (R)",
   "debug.copyState": "Скопировать состояние",
   "debug.copied": "Скопировано!",
+  "debug.quality": "Графика",
+  "debug.qualityHigh": "высокая",
+  "debug.qualityLow": "низкая",
   "dir.0": "Север",
   "dir.1": "Восток",
   "dir.2": "Юг",
@@ -51,6 +54,6 @@
   "debug.god": "Бессмертие",
   "debug.on": "вкл",
   "debug.off": "выкл",
-  "hud.incoming": "Опасно: получишь {n} урона — уйди с красных клеток",
+  "hud.incoming": "Опасно: получишь {n} урона — уйди с отмеченных клеток",
   "hud.baseAttack": "ЛКМ · шаг во врага"
 }

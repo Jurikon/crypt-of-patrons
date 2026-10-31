@@ -3,7 +3,7 @@ import './style.css';
 import { formatHash, parseHash, randomSeed } from './debug/url';
 import { detectLang, setLang, t } from './i18n';
 import { attachInput } from './input/input';
-import { GameRenderer } from './render/renderer';
+import { GameRenderer, type Quality } from './render/renderer';
 import { add, dirVec } from './core/grid';
 import { apply, createGame, preview, type Command, type DebugAction, type GameState } from './sim';
 import { App, ErrorScreen, type AppActions } from './ui/App';
@@ -29,9 +29,26 @@ let commands: Command[] = [];
 let buffered: Command | null = null;
 let selected: string | null = null;
 
+const QUALITY_KEY = 'cop.quality';
+/** The player's saved choice, or null if they never picked one. */
+function savedQuality(): Quality | null {
+  try {
+    const q = localStorage.getItem(QUALITY_KEY);
+    return q === 'low' || q === 'high' ? q : null;
+  } catch {
+    return null;
+  }
+}
+
 let renderer: GameRenderer;
+let quality: Quality = savedQuality() ?? 'high';
 try {
-  renderer = new GameRenderer(gameEl);
+  renderer = new GameRenderer(gameEl, quality);
+  // No GPU (software rendering): start on low unless the player chose otherwise.
+  if (!savedQuality() && renderer.isSoftwareRendered()) {
+    quality = 'low';
+    renderer.setQuality(quality);
+  }
 } catch (err) {
   console.warn('WebGL init failed', err);
   render(h(ErrorScreen, { message: t('error.webgl') }), uiEl);
@@ -52,6 +69,7 @@ const store = createStore<ViewState>({
   notice: null,
   hitAt: -1e9,
   shownHp: null,
+  quality,
 });
 const labels: LabelsStore = createStore({ labels: null });
 
@@ -140,6 +158,16 @@ const actions: AppActions = {
   newSeed,
   exportState: () => JSON.stringify({ seed, commands }),
   cheat: (action: DebugAction) => dispatch({ type: 'debug', playerId: PLAYER_ID, action }),
+  toggleQuality: () => {
+    const quality: Quality = store.get().quality === 'high' ? 'low' : 'high';
+    renderer.setQuality(quality);
+    store.set({ quality });
+    try {
+      localStorage.setItem(QUALITY_KEY, quality);
+    } catch {
+      // Storage blocked (private mode): the choice just isn't remembered.
+    }
+  },
   selectAbility,
   retry: () => loadSeed(seed),
   newRoom: newSeed,
@@ -204,4 +232,5 @@ requestAnimationFrame(frame);
   getState: () => state,
   getCommands: () => commands.slice(),
   isBusy: () => renderer.isBusy(performance.now()),
+  benchmark: (frames: number) => renderer.benchmark(frames),
 };

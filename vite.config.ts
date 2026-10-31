@@ -10,5 +10,7 @@ export default defineConfig({
   test: {
     include: ['src/**/*.test.ts', 'tools/**/*.test.ts'],
     environment: 'node',
+    // Several suites sweep hundreds of seeds and run in parallel; the 5 s default is too tight under load.
+    testTimeout: 20_000,
   },
 });

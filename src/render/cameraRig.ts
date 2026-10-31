@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Dir, Vec2 } from '../core/grid';
 import type { GameEvent, Room } from '../sim';
-import { CELL } from './roomMesh';
+import { CELL } from './dims';
 
 export const EYE_HEIGHT = 1.35;
 const STEP_MS = 150;

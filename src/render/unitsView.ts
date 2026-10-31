@@ -3,19 +3,47 @@ import type { Dir, Vec2 } from '../core/grid';
 import { getEnemy } from '../content';
 import type { GameState, Intent } from '../sim';
 import { cellCenter } from './cameraRig';
-import { PIT_DEPTH } from './roomMesh';
-import { SPRITE_ASPECT, spriteTexture } from './sprites';
+import { LAVA_Y } from './dims';
+import type { Particles } from './fx';
+import { modelGeometry, type ModelGeometry } from './modelMesh';
+import { toonMaterial } from './toon';
+import { MODELS, modelHeight } from './voxel/models';
 
-const SPRITE_H = 1.65;
-const FLASH_MS = 220;
+const FLASH_MS = 240;
+const STRIKE_MS = 300;
+const FALL_DEPTH = 1.8;
 
 const ease = (t: number) => 1 - (1 - t) ** 3;
+
+/** Facing angle for a grid direction; models face +Z at angle 0, so north (−Z) is π. */
+const yawFor = (d: Dir) => Math.PI - (d * Math.PI) / 2;
+
+/** Shortest signed difference between two angles. */
+const angleDelta = (from: number, to: number) => {
+  let d = (to - from) % (Math.PI * 2);
+  if (d > Math.PI) d -= Math.PI * 2;
+  if (d < -Math.PI) d += Math.PI * 2;
+  return d;
+};
 
 interface Tween {
   from: THREE.Vector3;
   to: THREE.Vector3;
   start: number;
   dur: number;
+}
+
+/** The three.js objects of one enemy. */
+interface Rig {
+  readonly geo: ModelGeometry;
+  readonly root: THREE.Group;
+  readonly tilt: THREE.Group;
+  readonly arm: THREE.Group;
+  readonly material: THREE.MeshToonMaterial;
+  readonly height: number;
+  readonly phase: number;
+  yaw: number;
+  armAngle: number;
 }
 
 /**
@@ -36,16 +64,55 @@ export interface UnitVisual {
   pos: THREE.Vector3;
   tween: Tween | null;
   lunge: { dir: THREE.Vector3; start: number; dur: number; dist: number } | null;
-  dying: { start: number; dur: number; fall: boolean } | null;
+  dying: { start: number; dur: number; fall: boolean; splashed: boolean } | null;
   flashStart: number;
-  sprite: THREE.Sprite | null;
+  strikeStart: number;
+  rig: Rig | null;
 }
+
+const outlineMaterial = new THREE.MeshBasicMaterial({ color: 0x0c0203, side: THREE.BackSide });
+const eyeMaterial = new THREE.MeshBasicMaterial({ color: new THREE.Color(3.2, 0.75, 0.12) });
 
 export class UnitsView {
   readonly group = new THREE.Group();
   readonly units = new Map<string, UnitVisual>();
+  constructor(private readonly fx: Particles) {}
 
-  /** Makes the visuals match `state` exactly (new room, undo, end of playback). */
+  private buildRig(type: string, seq: number): Rig {
+    const model = MODELS[getEnemy(type).model] ?? (MODELS.warrior as (typeof MODELS)[string]);
+    const geo = modelGeometry(model);
+    const material = toonMaterial({ emissive: 0x000000 });
+    const root = new THREE.Group();
+    const tilt = new THREE.Group();
+    root.add(tilt);
+    tilt.add(new THREE.Mesh(geo.body.mesh, material), new THREE.Mesh(geo.body.outline, outlineMaterial));
+    tilt.add(new THREE.Mesh(geo.eyes, eyeMaterial));
+    const arm = new THREE.Group();
+    arm.position.copy(geo.pivot);
+    arm.add(new THREE.Mesh(geo.arm.mesh, material), new THREE.Mesh(geo.arm.outline, outlineMaterial));
+    tilt.add(arm);
+    this.group.add(root);
+    return {
+      geo,
+      root,
+      tilt,
+      arm,
+      material,
+      height: modelHeight(model),
+      phase: seq * 1.7,
+      yaw: 0,
+      armAngle: model.poses.idle,
+    };
+  }
+
+  private dropRig(v: UnitVisual): void {
+    if (!v.rig) return;
+    this.group.remove(v.rig.root);
+    v.rig.material.dispose();
+    v.rig = null;
+  }
+
+  /** Makes the visuals match `state` exactly (new room, restart, end of playback). */
   sync(state: GameState): void {
     const seen = new Set<string>();
     const upsert = (
@@ -73,15 +140,9 @@ export class UnitsView {
           lunge: null,
           dying: null,
           flashStart: -1e9,
-          sprite: null,
+          strikeStart: -1e9,
+          rig: null,
         };
-        if (!isPlayer) {
-          const mat = new THREE.SpriteMaterial({ map: spriteTexture(getEnemy(type).sprite), transparent: true });
-          mat.alphaTest = 0.5;
-          v.sprite = new THREE.Sprite(mat);
-          v.sprite.scale.set(SPRITE_H * SPRITE_ASPECT, SPRITE_H, 1);
-          this.group.add(v.sprite);
-        }
         this.units.set(id, v);
       }
       v.cell = { x: u.x, y: u.y };
@@ -94,30 +155,23 @@ export class UnitsView {
       v.tween = null;
       v.lunge = null;
       v.dying = null;
-      if (v.sprite) {
-        v.sprite.visible = v.alive;
-        (v.sprite.material as THREE.SpriteMaterial).opacity = 1;
+      if (!isPlayer && v.alive && !v.rig) {
+        v.rig = this.buildRig(type, this.units.size);
+        v.rig.yaw = yawFor(u.dir);
       }
+      if (v.rig && !v.alive) this.dropRig(v);
     };
     for (const p of state.players) upsert(p.id, true, p.classId, p, null);
     for (const e of state.enemies) upsert(e.id, false, e.type, e, e.intent);
     for (const [id, v] of this.units) {
       if (seen.has(id)) continue;
-      if (v.sprite) {
-        this.group.remove(v.sprite);
-        v.sprite.material.dispose();
-      }
+      this.dropRig(v);
       this.units.delete(id);
     }
   }
 
   clear(): void {
-    for (const v of this.units.values()) {
-      if (v.sprite) {
-        this.group.remove(v.sprite);
-        v.sprite.material.dispose();
-      }
-    }
+    for (const v of this.units.values()) this.dropRig(v);
     this.units.clear();
   }
 
@@ -136,6 +190,12 @@ export class UnitsView {
     v.lunge = { dir: dir.normalize(), start: now, dur, dist };
   }
 
+  /** Plays the attack swing (the arm was already raised while the attack was telegraphed). */
+  strike(id: string, now: number): void {
+    const v = this.units.get(id);
+    if (v) v.strikeStart = now;
+  }
+
   flash(id: string, now: number): void {
     const v = this.units.get(id);
     if (v) v.flashStart = now;
@@ -144,10 +204,23 @@ export class UnitsView {
   die(id: string, now: number, dur: number, fall: boolean): void {
     const v = this.units.get(id);
     if (!v || v.dying) return;
-    v.dying = { start: now, dur, fall };
+    v.dying = { start: now, dur, fall, splashed: false };
+    if (!fall && v.rig) {
+      // Shatter: every voxel flies apart from where the model stands right now.
+      this.update(now);
+      const r = v.rig;
+      r.root.updateMatrixWorld(true);
+      const pieces: { pos: THREE.Vector3; color: THREE.Color }[] = [];
+      for (const p of r.geo.body.voxels)
+        pieces.push({ pos: p.pos.clone().applyMatrix4(r.tilt.matrixWorld), color: p.color });
+      for (const p of r.geo.arm.voxels)
+        pieces.push({ pos: p.pos.clone().applyMatrix4(r.arm.matrixWorld), color: p.color });
+      this.fx.shatter(pieces, r.geo.model.voxel, r.root.position.clone(), now);
+      r.root.visible = false;
+    }
   }
 
-  /** True while any unit is still moving, lunging or dying. */
+  /** True while any unit is still moving, lunging, striking or dying. */
   isAnimating(now: number): boolean {
     for (const v of this.units.values()) {
       if (v.tween && now - v.tween.start < v.tween.dur) return true;
@@ -158,42 +231,77 @@ export class UnitsView {
   }
 
   update(now: number): void {
+    const s = now / 1000;
     for (const v of this.units.values()) {
+      let walk = 0;
       if (v.tween) {
         const t = Math.min(1, (now - v.tween.start) / v.tween.dur);
         v.pos.copy(v.tween.from).lerp(v.tween.to, ease(t));
+        walk = Math.sin(t * Math.PI);
         if (t >= 1) v.tween = null;
       }
-      if (!v.sprite) continue;
+      const r = v.rig;
+      if (!r) continue;
       const p = v.pos.clone();
-      p.y = SPRITE_H / 2;
+      // Idle breathing and a hop while stepping.
+      p.y += Math.sin(s * 1.8 + r.phase) * 0.015 + walk * 0.08;
       if (v.lunge) {
         const t = (now - v.lunge.start) / v.lunge.dur;
         if (t >= 1) v.lunge = null;
         else p.addScaledVector(v.lunge.dir, Math.sin(t * Math.PI) * v.lunge.dist);
       }
-      const mat = v.sprite.material as THREE.SpriteMaterial;
+
+      // Turn smoothly to face the grid direction.
+      const k = 1 - Math.exp(-14 * (1 / 60));
+      r.yaw += angleDelta(r.yaw, yawFor(v.dir)) * k;
+
+      // Arm: raised while an attack is telegraphed, swung through on the strike, at rest otherwise.
+      const poses = r.geo.model.poses;
+      const st = (now - v.strikeStart) / STRIKE_MS;
+      if (st >= 0 && st < 1) {
+        r.armAngle = st < 0.35 ? poses.windup + (poses.strike - poses.windup) * ease(st / 0.35) : poses.strike;
+      } else {
+        const target = v.intent ? poses.windup : poses.idle;
+        r.armAngle += (target - r.armAngle) * 0.12;
+      }
+      r.arm.rotation.x = r.armAngle;
+
+      // Hit: white flash and a recoil.
+      const f = (now - v.flashStart) / FLASH_MS;
+      const hit = f >= 0 && f < 1 ? 1 - f : 0;
+      r.material.emissive.setScalar(hit * 0.9);
+      r.tilt.rotation.x = -0.3 * hit + Math.sin(s * 0.9 + r.phase) * 0.02;
+
       if (v.dying) {
         const t = Math.min(1, (now - v.dying.start) / v.dying.dur);
-        if (v.dying.fall) p.y -= t * t * PIT_DEPTH * 1.2;
-        else p.y -= t * SPRITE_H * 0.35;
-        mat.opacity = v.dying.fall ? 1 - t * 0.6 : 1 - t;
+        if (v.dying.fall) {
+          // Sink into the lava, tipping over, with a splash as it goes under.
+          p.y = LAVA_Y + 0.3 - t * t * FALL_DEPTH;
+          r.tilt.rotation.z = t * 0.9;
+          if (!v.dying.splashed && t > 0.25) {
+            v.dying.splashed = true;
+            this.fx.splash(new THREE.Vector3(p.x, LAVA_Y, p.z), now);
+          }
+        }
         if (t >= 1) {
           v.alive = false;
-          v.sprite.visible = false;
+          r.root.visible = false;
         }
       }
-      const f = (now - v.flashStart) / FLASH_MS;
-      if (f >= 0 && f < 1) mat.color.setRGB(1, 0.35 + 0.65 * f, 0.3 + 0.7 * f);
-      else mat.color.setRGB(1, 1, 1);
-      v.sprite.position.copy(p);
+      r.root.position.copy(p);
+      r.root.rotation.y = r.yaw;
     }
+  }
+
+  /** World position of the strike point (weapon height) for projectiles. */
+  muzzle(v: UnitVisual): THREE.Vector3 {
+    return v.pos.clone().setY(1.05);
   }
 
   /** Visual centre of a unit's head, for labels. */
   headPosition(v: UnitVisual): THREE.Vector3 {
     const p = v.pos.clone();
-    p.y = v.isPlayer ? 1.6 : (v.sprite?.position.y ?? SPRITE_H / 2) + SPRITE_H * 0.62;
+    p.y = v.isPlayer ? 1.6 : (v.rig?.root.position.y ?? 0) + (v.rig?.height ?? 1.5) + 0.12;
     return p;
   }
 }

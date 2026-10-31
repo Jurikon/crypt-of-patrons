@@ -9,6 +9,7 @@ export interface OverlayActions {
   exportState(): string;
   /** Debug cheats go through the simulation as commands, so bug reports replay exactly. */
   cheat(action: DebugAction): void;
+  toggleQuality(): void;
 }
 
 /** Debug overlay toggled with the backquote key. */
@@ -61,6 +62,9 @@ export function DebugOverlay({ view, actions }: { view: ViewState; actions: Over
         </button>
       </div>
       <div class="debug-buttons">
+        <button type="button" onClick={actions.toggleQuality} data-testid="quality">
+          {t('debug.quality')}: {t(view.quality === 'high' ? 'debug.qualityHigh' : 'debug.qualityLow')}
+        </button>
         <button type="button" onClick={() => actions.cheat('toggleGod')} data-testid="god">
           {t('debug.god')}: {p?.god ? t('debug.on') : t('debug.off')}
         </button>

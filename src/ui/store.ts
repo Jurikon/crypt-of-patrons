@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import type { RejectReason, GameState, Preview } from '../sim';
-import type { FrameLabels } from '../render/renderer';
+import type { FrameLabels, Quality } from '../render/renderer';
 
 /** What the HTML layer shows. The game state here is read-only for the UI. */
 export interface ViewState {
@@ -20,6 +20,8 @@ export interface ViewState {
   readonly hitAt: number;
   /** Player health as currently animated; null = use the real value. */
   readonly shownHp: number | null;
+  /** Graphics quality (debug menu); remembered per browser. */
+  readonly quality: Quality;
 }
 
 export interface Store<T> {

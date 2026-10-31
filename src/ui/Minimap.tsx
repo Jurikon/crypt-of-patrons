@@ -6,10 +6,10 @@ import { intentCells, type GameState } from '../sim';
 const CELL_PX = 9;
 
 const COLORS: Record<CellType, string> = {
-  floor: '#5a4c40',
-  wall: '#1a1512',
-  pillar: '#a89580',
-  pit: '#000000',
+  floor: '#5a3a30',
+  wall: '#1a0e0e',
+  pillar: '#a07a68',
+  pit: '#d0500e',
   door: '#8a5a2e',
 };
 
@@ -31,7 +31,7 @@ export function Minimap({ game }: { game: GameState }) {
         ctx.fillStyle = COLORS[t];
         ctx.fillRect(x * CELL_PX, y * CELL_PX, CELL_PX, CELL_PX);
         if (t === 'pit') {
-          ctx.strokeStyle = '#3a1410';
+          ctx.strokeStyle = '#ffa030';
           ctx.strokeRect(x * CELL_PX + 1.5, y * CELL_PX + 1.5, CELL_PX - 3, CELL_PX - 3);
         } else if (t === 'pillar') {
           ctx.fillStyle = COLORS.floor;
@@ -43,8 +43,8 @@ export function Minimap({ game }: { game: GameState }) {
         }
       }
     }
-    // Telegraphed attacks: red cells, like on the floor.
-    ctx.fillStyle = 'rgba(255, 50, 30, 0.55)';
+    // Telegraphed attacks: ice-blue cells, like the frames on the floor (lava is already orange).
+    ctx.fillStyle = 'rgba(150, 225, 255, 0.6)';
     for (const e of game.enemies) {
       if (!e.intent) continue;
       for (const c of intentCells(game, e, e.intent).cells)

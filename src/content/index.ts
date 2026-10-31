@@ -50,7 +50,7 @@ export const ENEMIES: readonly EnemyDef[] = [
     move: 1,
     attack: { kind: 'melee', damage: 2 },
     behavior: { kind: 'melee' },
-    sprite: 'warrior',
+    model: 'warrior',
     weight: 3,
   },
   {
@@ -60,7 +60,7 @@ export const ENEMIES: readonly EnemyDef[] = [
     move: 1,
     attack: { kind: 'line', damage: 1, range: 6 },
     behavior: { kind: 'ranged', minRange: 2, maxRange: 5 },
-    sprite: 'archer',
+    model: 'archer',
     weight: 2,
   },
 ];

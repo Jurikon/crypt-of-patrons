@@ -57,8 +57,8 @@ export interface EnemyDef {
   readonly move: number;
   readonly attack: AttackSpec;
   readonly behavior: EnemyBehavior;
-  /** Which procedural sprite the renderer draws. */
-  readonly sprite: string;
+  /** Which voxel model the renderer draws. */
+  readonly model: string;
   /** Relative spawn frequency in encounters. */
   readonly weight: number;
 }

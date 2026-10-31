@@ -11,6 +11,9 @@
   "debug.newSeed": "New seed (R)",
   "debug.copyState": "Copy state",
   "debug.copied": "Copied!",
+  "debug.quality": "Graphics",
+  "debug.qualityHigh": "high",
+  "debug.qualityLow": "low",
   "dir.0": "North",
   "dir.1": "East",
   "dir.2": "South",
@@ -51,6 +54,6 @@
   "debug.god": "Immortal",
   "debug.on": "on",
   "debug.off": "off",
-  "hud.incoming": "Danger: you will take {n} damage — step out of the red cells",
+  "hud.incoming": "Danger: you will take {n} damage — step off the marked cells",
   "hud.baseAttack": "LMB · walk into enemy"
 }

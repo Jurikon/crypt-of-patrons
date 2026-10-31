@@ -1,59 +1,35 @@
 import * as THREE from 'three';
-import { createRng, fork } from '../core/rng';
-import type { Vec2 } from '../core/grid';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { createRng, fork, nextU32 } from '../core/rng';
+import { getCell, type Vec2 } from '../core/grid';
 import { intentCells, type Enemy, type GameEvent, type GameState, type Intent, type Preview, type Room } from '../sim';
 import { CameraRig, cellCenter } from './cameraRig';
+import { buildCaveMeshes, type CaveMeshes } from './caveMesh';
+import { CELL, WALL_H } from './dims';
+import { Particles } from './fx';
 import { Highlights, type Highlight } from './highlights';
-import { buildRoomMeshes, CELL, WALL_H, type RoomMeshes } from './roomMesh';
-import { createRoomTextures, type RoomTextures } from './textures';
 import { UnitsView, type UnitVisual } from './unitsView';
+import { buildCave } from './voxel/cave';
 
-/** Internal render height in pixels; the canvas is upscaled with nearest-neighbour filtering. */
-export const RENDER_HEIGHT = 360;
+export type Quality = 'high' | 'low';
 
-const FOG_COLOR = 0x070504;
-const FOG_DENSITY = 0.075;
-const TORCH_INTENSITY = 28;
+// Look of the reference: warm fog, purple sky / maroon ground hemisphere light for hue-shifted
+// shadows, orange point lights from the torch, braziers and lava.
+const FOG_COLOR = 0x1a0705;
+const BACKGROUND = 0x140504;
+const FOG_DENSITY = 0.055;
+const HEMI_INTENSITY = 2.2;
+const TORCH_INTENSITY = 2.2;
+const BRAZIER_INTENSITY = 6;
+const LAVA_LIGHT_INTENSITY = 3;
+const BLOOM = { strength: 0.45, radius: 0.35, threshold: 0.8 };
+const MAX_PIXEL_RATIO = 2;
 
-// PS1-style output: linear → sRGB, then ordered (Bayer 4×4) dithering into 32 levels per channel.
-const POST_VERTEX = /* glsl */ `
-  varying vec2 vUv;
-  void main() {
-    vUv = uv;
-    gl_Position = vec4(position.xy, 0.0, 1.0);
-  }
-`;
-const POST_FRAGMENT = /* glsl */ `
-  precision highp float;
-  uniform sampler2D tScene;
-  uniform float uLevels;
-  varying vec2 vUv;
-
-  float bayer4(vec2 p) {
-    int x = int(mod(p.x, 4.0));
-    int y = int(mod(p.y, 4.0));
-    int i = x + y * 4;
-    float m[16];
-    m[0]=0.0; m[1]=8.0; m[2]=2.0; m[3]=10.0;
-    m[4]=12.0; m[5]=4.0; m[6]=14.0; m[7]=6.0;
-    m[8]=3.0; m[9]=11.0; m[10]=1.0; m[11]=9.0;
-    m[12]=15.0; m[13]=7.0; m[14]=13.0; m[15]=5.0;
-    for (int k = 0; k < 16; k++) { if (k == i) return m[k] / 16.0 - 0.5; }
-    return 0.0;
-  }
-
-  vec3 toSrgb(vec3 c) {
-    c = max(c, vec3(0.0));
-    return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
-  }
-
-  void main() {
-    vec3 c = toSrgb(texture2D(tScene, vUv).rgb);
-    c += bayer4(gl_FragCoord.xy) / uLevels;
-    c = floor(c * uLevels + 0.5) / uLevels;
-    gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
-  }
-`;
+/** Fire-like flicker from a few incommensurate sines (no randomness, no state). */
+const flicker = (s: number, a: number, b: number) => 0.82 + 0.11 * Math.sin(s * a) + 0.07 * Math.sin(s * b + 1.3);
 
 /**
  * How long each event blocks the queue, in ms. Movement does not block: the player's step and every
@@ -72,6 +48,7 @@ const MOVE_MS = 140;
 const ENEMY_PHASE_PAUSE_MS = 0;
 const FLOATER_MS = 900;
 const STRIKE_MS = 350;
+const ARROW_MS = 150;
 
 /** A screen-space point in CSS pixels relative to the canvas. */
 export interface ScreenPoint {
@@ -140,23 +117,24 @@ export class GameRenderer {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(70, 16 / 9, 0.05, 120);
-  private readonly target: THREE.WebGLRenderTarget;
-  private readonly postScene = new THREE.Scene();
-  private readonly postCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-  private readonly postMaterial: THREE.ShaderMaterial;
+  private readonly composer: EffectComposer;
+  private readonly bloom: UnrealBloomPass;
   private readonly fog = new THREE.FogExp2(FOG_COLOR, FOG_DENSITY);
-  private readonly torch = new THREE.PointLight(0xff9a4a, TORCH_INTENSITY, 20, 1.25);
-  private readonly ambient = new THREE.AmbientLight(0x4a3a2e, 0.9);
-  private readonly topLight = new THREE.AmbientLight(0x8a7a6a, 0);
+  private readonly hemi = new THREE.HemisphereLight(0x5a2a70, 0x501008, HEMI_INTENSITY);
+  // Shallow falloff: bright enough across the room without blowing out walls at arm's length.
+  private readonly torch = new THREE.PointLight(0xffc890, TORCH_INTENSITY, 22, 0.6);
+  private readonly topLight = new THREE.AmbientLight(0xc8a890, 0);
   private readonly marker: THREE.Mesh;
-  private readonly unitsView = new UnitsView();
+  private readonly fx = new Particles();
+  private readonly unitsView = new UnitsView(this.fx);
   private readonly highlights = new Highlights();
-  private room: RoomMeshes | null = null;
-  private textures: RoomTextures | null = null;
+  private room: CaveMeshes | null = null;
+  private roomLights: { light: THREE.PointLight; base: number; a: number; b: number }[] = [];
   private rig: CameraRig | null = null;
   private currentRoom: Room | null = null;
   private seed = -1;
   private playerIds = new Set<string>();
+  private quality: Quality = 'high';
 
   /** Events waiting to be animated, and the state they lead to. */
   private queue: GameEvent[] = [];
@@ -173,33 +151,24 @@ export class GameRenderer {
   private cssW = 1;
   private cssH = 1;
 
-  constructor(container: HTMLElement) {
+  constructor(container: HTMLElement, quality: Quality = 'high') {
     this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(1);
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.canvas = this.renderer.domElement;
     this.canvas.className = 'game-canvas';
     container.appendChild(this.canvas);
 
-    this.target = new THREE.WebGLRenderTarget(1, 1, {
-      type: THREE.HalfFloatType,
-      magFilter: THREE.NearestFilter,
-      minFilter: THREE.NearestFilter,
-      depthBuffer: true,
-    });
-    this.postMaterial = new THREE.ShaderMaterial({
-      uniforms: { tScene: { value: this.target.texture }, uLevels: { value: 31 } },
-      vertexShader: POST_VERTEX,
-      fragmentShader: POST_FRAGMENT,
-      depthTest: false,
-      depthWrite: false,
-    });
-    this.postScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.postMaterial));
+    this.composer = new EffectComposer(this.renderer);
+    this.composer.addPass(new RenderPass(this.scene, this.camera));
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), BLOOM.strength, BLOOM.radius, BLOOM.threshold);
+    this.composer.addPass(this.bloom);
+    this.composer.addPass(new OutputPass());
 
-    this.scene.background = new THREE.Color(FOG_COLOR);
+    this.scene.background = new THREE.Color(BACKGROUND);
     this.scene.fog = this.fog;
-    this.scene.add(this.ambient, this.topLight, this.camera, this.unitsView.group, this.highlights.group);
+    this.scene.add(this.hemi, this.topLight, this.camera, this.unitsView.group, this.highlights.group, this.fx.group);
     this.camera.add(this.torch);
-    this.torch.position.set(0.25, -0.15, -0.1);
+    this.torch.position.set(0.6, 0.5, 0.3);
 
     // Player marker, only visible from above.
     const markerGeo = new THREE.ConeGeometry(CELL * 0.28, CELL * 0.6, 3);
@@ -208,7 +177,61 @@ export class GameRenderer {
     this.marker.visible = false;
     this.scene.add(this.marker);
 
+    this.quality = quality;
     this.resize();
+  }
+
+  /** True when WebGL runs on the CPU (SwiftShader, llvmpipe…): full quality would crawl there. */
+  isSoftwareRendered(): boolean {
+    const gl = this.renderer.getContext();
+    const info = gl.getExtension('WEBGL_debug_renderer_info');
+    const name = String(info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+    return /swiftshader|llvmpipe|software|basic render/i.test(name);
+  }
+
+  /** High: full pixel density (up to 2×), bloom and particles. Low: 1×, no bloom, no ambient particles. */
+  setQuality(q: Quality): void {
+    this.quality = q;
+    this.fx.enabled = q === 'high';
+    this.resize();
+  }
+
+  /** Builds the voxel cave, its lights and particles for a new room. */
+  private buildRoom(state: GameState): void {
+    if (this.room) {
+      this.scene.remove(this.room.group);
+      this.room.dispose();
+    }
+    for (const l of this.roomLights) this.scene.remove(l.light);
+    this.roomLights = [];
+
+    const caveSeed = nextU32(fork(createRng(state.seed), 'cave'));
+    const cave = buildCave(state.room.grid, caveSeed);
+    this.room = buildCaveMeshes(cave);
+    this.scene.add(this.room.group);
+
+    // One light per door (between its two braziers) and per lava pool.
+    for (let i = 0; i + 1 < cave.braziers.length; i += 2) {
+      const a = cave.braziers[i] as (typeof cave.braziers)[number];
+      const b = cave.braziers[i + 1] as (typeof cave.braziers)[number];
+      const light = new THREE.PointLight(0xff8030, BRAZIER_INTENSITY, 12, 0.9);
+      light.position.set((a.x + b.x) / 2, a.y + 0.1, (a.z + b.z) / 2);
+      this.roomLights.push({ light, base: BRAZIER_INTENSITY, a: 9.1 + i, b: 23.7 - i });
+    }
+    for (const [i, pool] of cave.lavaPools.entries()) {
+      const base = LAVA_LIGHT_INTENSITY + Math.min(4, pool.cells) * 0.6;
+      const light = new THREE.PointLight(0xff5a10, base, 9, 0.9);
+      light.position.set(pool.x, 0.5, pool.z);
+      this.roomLights.push({ light, base, a: 3.1 + i * 0.4, b: 7.7 + i * 0.6 });
+    }
+    for (const l of this.roomLights) this.scene.add(l.light);
+
+    const g = state.room.grid;
+    const open: THREE.Vector3[] = [];
+    for (let y = 0; y < g.h; y++)
+      for (let x = 0; x < g.w; x++)
+        if (getCell(g, x, y) !== 'wall' && getCell(g, x, y) !== 'door') open.push(cellCenter({ x, y }));
+    this.fx.setRoom(open, CELL, cave.braziers);
   }
 
   /**
@@ -220,14 +243,7 @@ export class GameRenderer {
     if (!player) return;
     if (state.seed !== this.seed) {
       this.seed = state.seed;
-      if (this.room) {
-        this.scene.remove(this.room.group);
-        this.room.dispose();
-      }
-      this.textures?.dispose();
-      this.textures = createRoomTextures(fork(createRng(state.seed), 'textures'));
-      this.room = buildRoomMeshes(state.room, this.textures);
-      this.scene.add(this.room.group);
+      this.buildRoom(state);
       this.currentRoom = state.room;
       this.unitsView.clear();
     }
@@ -270,7 +286,8 @@ export class GameRenderer {
       this.playing !== null ||
       this.queue.length > 0 ||
       (this.rig?.isBusy(now) ?? false) ||
-      this.unitsView.isAnimating(now)
+      this.unitsView.isAnimating(now) ||
+      this.fx.isBusy(now)
     );
   }
 
@@ -278,12 +295,12 @@ export class GameRenderer {
     const parent = this.canvas.parentElement;
     this.cssW = parent?.clientWidth || window.innerWidth;
     this.cssH = parent?.clientHeight || window.innerHeight;
-    const aspect = this.cssW / Math.max(1, this.cssH);
-    const h = RENDER_HEIGHT;
-    const w = Math.max(1, Math.round(h * aspect));
-    this.renderer.setSize(w, h, false);
-    this.target.setSize(w, h);
-    this.camera.aspect = aspect;
+    const ratio = this.quality === 'high' ? Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO) : 1;
+    this.renderer.setPixelRatio(ratio);
+    this.renderer.setSize(this.cssW, this.cssH, false);
+    this.composer.setPixelRatio(ratio);
+    this.composer.setSize(this.cssW, this.cssH);
+    this.camera.aspect = this.cssW / Math.max(1, this.cssH);
     this.camera.updateProjectionMatrix();
     // Re-fit the overhead view to the new aspect ratio.
     if (this.rig && this.currentRoom) this.rig.setRoom(this.currentRoom);
@@ -345,6 +362,11 @@ export class GameRenderer {
             y: u.cell.y + [-1, 0, 1, 0][e.intent.dir]!,
           };
           v.lungeTowards(e.unitId, first, now, EVENT_MS.enemyAttack ?? 0, e.intent.kind === 'melee' ? 0.7 : 0.25);
+          v.strike(e.unitId, now);
+          if (e.intent.kind === 'line') {
+            const end = e.cells[e.cells.length - 1] ?? first;
+            this.fx.arrow(v.muzzle(u), cellCenter(end).setY(1.05), now, ARROW_MS);
+          }
         }
         this.strikes.push({ cells: e.cells, start: now });
         return EVENT_MS.enemyAttack ?? 0;
@@ -465,14 +487,15 @@ export class GameRenderer {
     this.camera.updateMatrixWorld();
     const top = rig.topBlend;
 
-    // Torch flicker: a few incommensurate sines read as fire without any randomness.
     const s = now / 1000;
-    const flicker = 1 + Math.sin(s * 9.1) * 0.05 + Math.sin(s * 23.7) * 0.035 + Math.sin(s * 3.3) * 0.04;
-    this.torch.intensity = TORCH_INTENSITY * flicker;
+    this.torch.intensity = TORCH_INTENSITY * (0.94 + 0.06 * flicker(s, 9.1, 23.7));
+    for (const l of this.roomLights) l.light.intensity = l.base * flicker(s, l.a, l.b);
+    this.room.lavaMaterial.uniforms.uTime!.value = s;
+    this.fx.update(now);
 
     // Top view: clear the fog, lift the ambient light, drop the ceiling, show the player marker.
     this.fog.density = FOG_DENSITY * (1 - top);
-    this.topLight.intensity = top * 3.2;
+    this.topLight.intensity = top * 2.5;
     this.room.ceiling.visible = top < 0.02;
     this.marker.visible = top > 0.02;
     const p = rig.currentPos(now);
@@ -483,10 +506,8 @@ export class GameRenderer {
     const { list, cellLabels } = this.buildHighlights(now);
     this.highlights.draw(list, now);
 
-    this.renderer.setRenderTarget(this.target);
-    this.renderer.render(this.scene, this.camera);
-    this.renderer.setRenderTarget(null);
-    this.renderer.render(this.postScene, this.postCamera);
+    if (this.quality === 'high') this.composer.render();
+    else this.renderer.render(this.scene, this.camera);
 
     return this.labels(now, cellLabels, top);
   }
@@ -554,13 +575,27 @@ export class GameRenderer {
     return { width: this.cssW, height: this.cssH, units, floaters, cells, topView: top, enemyPhase: this.enemyPhase };
   }
 
+  /**
+   * Debug: renders `frames` frames back to back and returns the average milliseconds per frame,
+   * waiting for the GPU each time. Independent of the browser's frame pacing (hidden tabs, vsync).
+   */
+  benchmark(frames: number): number {
+    const gl = this.renderer.getContext();
+    const px = new Uint8Array(4);
+    const start = performance.now();
+    for (let i = 0; i < frames; i++) {
+      this.render(start + i * 16);
+      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    }
+    return (performance.now() - start) / frames;
+  }
+
   dispose(): void {
     this.room?.dispose();
-    this.textures?.dispose();
     this.highlights.dispose();
     this.unitsView.clear();
-    this.target.dispose();
-    this.postMaterial.dispose();
+    this.fx.dispose();
+    this.composer.dispose();
     this.renderer.dispose();
     this.canvas.remove();
   }
