@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { apply, replay } from './apply';
-import type { Command } from './commands';
+import type { Command, GameEvent } from './commands';
 import { createGame } from './state';
 import { stateFromMap } from './testing';
 
 const move = (dir: 'forward' | 'back' | 'left' | 'right'): Command => ({ type: 'move', playerId: 'p1', dir });
 const turn = (dir: 'left' | 'right'): Command => ({ type: 'turn', playerId: 'p1', dir });
+const types = (events: readonly GameEvent[]) => events.map((e) => e.type);
 
-// A far-away warrior keeps the combat active without interfering.
+// A far-away warrior keeps the combat active.
 const OPEN = `
 #########
 #.......#
@@ -21,69 +22,84 @@ describe('apply: movement', () => {
   it('moves relative to facing', () => {
     // Facing east: forward = east, left = north, right = south, back = west.
     const s = stateFromMap(`
-      #####
-      #...#
-      #.>.#
-      #...#
-      #..W#
-      #####`);
+      #######
+      #.....#
+      #.>...#
+      #.....#
+      #....W#
+      #######`);
     expect(apply(s, move('forward')).state.players[0]).toMatchObject({ x: 3, y: 2 });
     expect(apply(s, move('left')).state.players[0]).toMatchObject({ x: 2, y: 1 });
     expect(apply(s, move('right')).state.players[0]).toMatchObject({ x: 2, y: 3 });
     expect(apply(s, move('back')).state.players[0]).toMatchObject({ x: 1, y: 2 });
   });
 
-  it('emits moved with from/to and spends 1 AP', () => {
+  it('a step is one turn: the world answers immediately', () => {
     const s = stateFromMap(OPEN);
     const r = apply(s, move('left'));
-    expect(r.events).toEqual([{ type: 'moved', unitId: 'p1', from: { x: 4, y: 3 }, to: { x: 4, y: 2 } }]);
-    expect(r.state.players[0]!.ap).toBe(2);
+    expect(r.events[0]).toEqual({ type: 'moved', unitId: 'p1', from: { x: 4, y: 3 }, to: { x: 4, y: 2 } });
+    expect(types(r.events)).toContain('phaseChanged');
+    expect(r.state.combat.turn).toBe(2);
+    // The warrior took a step towards us.
+    expect(r.state.enemies[0]).not.toMatchObject({ x: 7, y: 5 });
   });
 
   it.each([
     ['wall', 'back', { x: 3, y: 3 }],
     ['pit', 'back', { x: 3, y: 3 }],
     ['door', 'forward', { x: 5, y: 3 }],
-  ] as const)('cannot step into %s; bumping is free', (cell, dir, at) => {
+  ] as const)('cannot step into %s; bumping takes no time', (cell, dir, at) => {
     const s = stateFromMap(OPEN);
     if (cell === 'wall') s.room.grid.cells[3 * 9 + 3] = 'wall';
     const r = apply(s, move(dir));
-    expect(r.state.players[0]).toMatchObject({ x: 4, y: 3, ap: 3 });
+    expect(r.state.players[0]).toMatchObject({ x: 4, y: 3 });
     expect(r.events).toEqual([{ type: 'bumped', unitId: 'p1', at, cell }]);
+    expect(r.state.combat.turn).toBe(1);
   });
 
-  it('cannot step into a pillar or an enemy', () => {
+  it('cannot step into a pillar', () => {
     const s = stateFromMap(OPEN);
-    s.players[0]!.y = 3;
-    s.players[0]!.x = 4;
     s.players[0]!.dir = 2;
-    // Pillar is at (4, 4), directly south.
     expect(apply(s, move('forward')).events[0]).toMatchObject({ type: 'bumped', cell: 'pillar' });
-    const s2 = stateFromMap(`
+  });
+
+  it('turning takes no time', () => {
+    const s = stateFromMap(OPEN);
+    const r = apply(s, turn('left'));
+    expect(r.events).toEqual([{ type: 'turned', unitId: 'p1', from: 1, to: 0 }]);
+    expect(r.state.combat.turn).toBe(1);
+    expect(r.state.enemies).toEqual(s.enemies);
+  });
+
+  it('walking forward into an enemy attacks it with the base attack', () => {
+    const s = stateFromMap(`
       #####
-      #.^.#
       #.W.#
+      #.^.#
+      #...#
       #####`);
-    expect(apply(s2, move('back')).events[0]).toMatchObject({ type: 'bumped', at: { x: 2, y: 2 } });
+    const r = apply(s, move('forward'));
+    expect(r.state.players[0]).toMatchObject({ x: 2, y: 2 });
+    expect(types(r.events).slice(0, 2)).toEqual(['abilityUsed', 'damaged']);
+    expect(r.state.enemies[0]!.hp).toBe(2);
   });
 
-  it('cannot move with 0 AP, but turning is free', () => {
-    let s = stateFromMap(OPEN);
-    s = replay(s, [move('left'), move('right'), move('left')]);
-    expect(s.players[0]!.ap).toBe(0);
-    const r = apply(s, move('right'));
-    expect(r.events).toEqual([{ type: 'rejected', reason: 'not_enough_ap' }]);
-    expect(r.state).toBe(s);
-    const t = apply(s, turn('left'));
-    expect(t.events[0]).toMatchObject({ type: 'turned', from: 1, to: 0 });
-    expect(t.state.players[0]!.ap).toBe(0);
+  it('strafing into an enemy is just a bump', () => {
+    const s = stateFromMap(`
+      #####
+      #.^W#
+      #...#
+      #####`);
+    expect(apply(s, move('right')).events).toEqual([
+      { type: 'bumped', unitId: 'p1', at: { x: 3, y: 1 }, cell: 'floor' },
+    ]);
   });
 
-  it('walking is free once the combat is over', () => {
+  it('after the combat, walking has no world answer', () => {
     const s = stateFromMap(OPEN);
     s.combat.status = 'won';
-    s.players[0]!.ap = 0;
-    expect(apply(s, move('left')).events[0]?.type).toBe('moved');
+    s.enemies = [];
+    expect(types(apply(s, move('left')).events)).toEqual(['moved']);
   });
 });
 
@@ -94,7 +110,6 @@ describe('apply: purity and serialization', () => {
     apply(s, move('forward'));
     apply(s, turn('left'));
     apply(s, { type: 'useAbility', playerId: 'p1', abilityId: 'knight.sword' });
-    apply(s, { type: 'endTurn', playerId: 'p1' });
     expect(JSON.stringify(s)).toBe(before);
   });
 
@@ -122,9 +137,7 @@ describe('apply: purity and serialization', () => {
       #...#
       #..W#
       #####`);
-    // p2 stands south of p1… and p1 is the one at (2,1); move p2 north into p1.
-    const r = apply(two, { type: 'move', playerId: 'p2', dir: 'forward' });
-    expect(r.events[0]?.type).toBe('bumped');
+    expect(apply(two, { type: 'move', playerId: 'p2', dir: 'forward' }).events[0]?.type).toBe('bumped');
   });
 });
 
@@ -137,7 +150,6 @@ describe('determinism', () => {
       { type: 'useAbility', playerId: 'p1', abilityId: 'knight.sword' },
       move('back'),
       { type: 'useAbility', playerId: 'p1', abilityId: 'knight.shieldBash' },
-      { type: 'endTurn', playerId: 'p1' },
       turn('left'),
       move('right'),
     ];

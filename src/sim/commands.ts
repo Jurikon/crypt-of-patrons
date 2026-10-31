@@ -11,12 +11,11 @@ export type Command =
   | { readonly type: 'move'; readonly playerId: string; readonly dir: MoveDir }
   | { readonly type: 'turn'; readonly playerId: string; readonly dir: TurnDir }
   | { readonly type: 'useAbility'; readonly playerId: string; readonly abilityId: string }
-  | { readonly type: 'endTurn'; readonly playerId: string }
   /** Debug cheats are commands too, so a bug report that used them still replays exactly. */
   | { readonly type: 'debug'; readonly playerId: string; readonly action: DebugAction };
 
 export type RejectReason =
-  'unknown_player' | 'unknown_command' | 'unknown_ability' | 'not_enough_ap' | 'on_cooldown' | 'combat_over' | 'dead';
+  'unknown_player' | 'unknown_command' | 'unknown_ability' | 'on_cooldown' | 'combat_over' | 'dead';
 
 /** What happened, in order, for the renderer and UI to animate. */
 export type GameEvent =

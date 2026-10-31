@@ -5,7 +5,7 @@ import { generateRoom, type Room } from './gen/room';
 import { placeEncounter } from './encounter';
 import { declareIntentsInPlace } from './ai';
 
-export const STATE_VERSION = 2;
+export const STATE_VERSION = 3;
 
 export interface Cooldown {
   readonly abilityId: string;
@@ -23,14 +23,10 @@ interface UnitBase {
 
 export interface Player extends UnitBase {
   readonly classId: string;
-  ap: number;
-  maxAp: number;
-  /** Ability ids in slot order; the first is the base attack. */
+  /** Ability ids in slot order; the first is the base attack (also used by walking into an enemy). */
   abilities: string[];
   passives: string[];
   cooldowns: Cooldown[];
-  /** Set by any ability use; the app's undo stops at this point. */
-  attackedThisTurn: boolean;
   /** Debug immortality. */
   god: boolean;
 }
@@ -47,6 +43,10 @@ export interface Enemy extends UnitBase {
 
 export type Unit = Player | Enemy;
 
+/**
+ * Turn structure: every player action that takes time (a step or an ability) is one turn, after which
+ * the world answers at once (enemies now; dungeon hazards later). Turning and bumping take no time.
+ */
 export interface CombatState {
   turn: number;
   phase: 'player' | 'enemy';
@@ -84,12 +84,9 @@ export function createPlayer(id: string, classId: string, x: number, y: number, 
     dir,
     hp: cls.maxHp,
     maxHp: cls.maxHp,
-    ap: cls.maxAp,
-    maxAp: cls.maxAp,
     abilities: [...cls.abilities],
     passives: [...cls.passives],
     cooldowns: [],
-    attackedThisTurn: false,
     god: false,
   };
 }

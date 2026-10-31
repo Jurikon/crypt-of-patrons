@@ -11,4 +11,10 @@ describe('random-play bot', () => {
     expect(results.some((r) => r.status === 'won')).toBe(true);
     expect(results.some((r) => r.status === 'lost')).toBe(true);
   }, 60_000);
+
+  it('a simple greedy fighter also always finishes', () => {
+    for (const r of playFights(200, 1, 'greedy')) {
+      expect(r.status, `seed ${r.seed} did not finish in ${TURN_LIMIT} turns`).not.toBe('active');
+    }
+  }, 60_000);
 });

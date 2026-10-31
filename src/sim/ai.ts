@@ -122,6 +122,25 @@ function chooseCell(state: GameState, b: Bfs, move: number, score: (c: Vec2) => 
   return bestI;
 }
 
+/** The reachable cell (any distance) with the shortest path among those `score` accepts; ties by score, then index. */
+function nearestCell(state: GameState, b: Bfs, score: (c: Vec2) => number[] | null): number | null {
+  const g = state.room.grid;
+  let bestI: number | null = null;
+  let bestScore: number[] | null = null;
+  for (let i = 0; i < b.dist.length; i++) {
+    const d = b.dist[i] as number;
+    if (d < 0) continue;
+    const s = score({ x: i % g.w, y: Math.floor(i / g.w) });
+    if (!s) continue;
+    const full = [d, ...s, i];
+    if (better(full, bestScore)) {
+      bestScore = full;
+      bestI = i;
+    }
+  }
+  return bestI;
+}
+
 /** True if no wall/pillar/door lies strictly between a and b (which share a row or column). */
 function clearLine(state: GameState, a: Vec2, b: Vec2, ignore: Unit): { clear: boolean; unitsBetween: number } {
   const d = dirTowards(a, b);
@@ -207,12 +226,19 @@ function planRanged(state: GameState, e: Enemy, move: number, minRange: number, 
   };
   let target = chooseCell(state, b, move, (c) => lineScore(c)?.score ?? null);
   if (target === null) {
-    // No firing position this turn: move to line up as well as possible at a comfortable distance.
+    // No firing position this turn: walk the shortest route to the nearest one. (Greedily improving
+    // alignment gets stuck in corners: bot seed 171.)
+    const goal = nearestCell(state, b, (c) => lineScore(c)?.score ?? null);
+    if (goal !== null) {
+      const path = pathTo(state, b, goal).slice(0, move);
+      const end = path[path.length - 1] ?? { x: e.x, y: e.y };
+      const p = nearestPlayer(state, end);
+      return { path, face: p ? dirTowards(end, p) : e.dir };
+    }
+    // No firing position anywhere (walled off): just get closer.
     target = chooseCell(state, b, move, (c) => {
       const p = nearestPlayer(state, c);
-      if (!p) return [0];
-      const misalign = Math.min(Math.abs(c.x - p.x), Math.abs(c.y - p.y));
-      return [misalign, Math.abs(manhattan(c, p) - ideal - 1)];
+      return p ? [manhattan(c, p)] : [0];
     });
   }
   const path = target === null ? [] : pathTo(state, b, target);

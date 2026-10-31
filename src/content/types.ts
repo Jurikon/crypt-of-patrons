@@ -15,8 +15,7 @@ export interface AbilityDef {
   /** i18n key of the display name; descriptions are generated from `effects`. */
   readonly nameKey: string;
   readonly tags: readonly string[];
-  readonly apCost: number;
-  /** Turns before it can be used again; 0 = every turn. */
+  /** Turns it stays unavailable after use; 0 = every turn. Every ability use takes one turn. */
   readonly cooldown: number;
   readonly target: TargetSpec;
   readonly effects: readonly EffectSpec[];
@@ -35,7 +34,6 @@ export interface ClassDef {
   readonly id: string;
   readonly nameKey: string;
   readonly maxHp: number;
-  readonly maxAp: number;
   /** Base attack first, then the starting ability. */
   readonly abilities: readonly string[];
   readonly passives: readonly string[];
