@@ -57,6 +57,13 @@ const STATE_MIGRATIONS: Record<number, (s: Json) => Json> = {
     })),
     run: s.run ? { initiation: false, treasures: 0, ...(s.run as Json) } : null,
   }),
+  // v7 → v8 (M5): patron gifts and altars.
+  7: (s) => ({
+    ...s,
+    version: 8,
+    players: (s.players as Json[]).map((p) => ({ gifts: [], turnUses: [], ...p })),
+    run: s.run ? { patron: null, altars: 0, forceAltar: false, ...(s.run as Json) } : null,
+  }),
 };
 
 export function migrateState(raw: unknown): GameState | null {

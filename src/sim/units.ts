@@ -1,14 +1,15 @@
-import { getHybrid, getItem, getModifier, getPassive, getStatus, type RuleDef, type StatId } from '../content';
+import { getGift, getHybrid, getItem, getModifier, getPassive, getStatus, type RuleDef, type StatId } from '../content';
 import type { GameEvent } from './commands';
 import { isPlayer, type GameState, type Player, type Unit } from './state';
 
-/** Every rule a player carries, in a fixed order: passives, modifiers, items, the hybrid's feature. */
+/** Every rule a player carries, in a fixed order: passives, modifiers, items, the hybrid's feature, gifts. */
 export function playerRules(p: Player): RuleDef[] {
   return [
     ...p.passives.map((id) => getPassive(id)),
     ...p.modifiers.map((id) => getModifier(id)),
     ...p.items.map((id) => getItem(id)),
     ...(p.hybrid ? [getHybrid(p.hybrid).rule] : []),
+    ...p.gifts.map((id) => getGift(id)),
   ];
 }
 

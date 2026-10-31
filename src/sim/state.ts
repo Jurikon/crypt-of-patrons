@@ -5,7 +5,7 @@ import { generateRoom, type Room } from './gen/room';
 import { placeCorpses, placeEncounter } from './encounter';
 import { declareIntentsInPlace } from './ai';
 
-export const STATE_VERSION = 7;
+export const STATE_VERSION = 8;
 
 export interface Cooldown {
   readonly abilityId: string;
@@ -43,6 +43,10 @@ export interface Player extends UnitBase {
   items: string[];
   /** Rules with a once-per-room trigger that already fired in this room. */
   ruleUses: string[];
+  /** Rules with a once-per-turn trigger that already fired this turn. */
+  turnUses: string[];
+  /** Patron gifts and duo gifts, in the order they were taken. */
+  gifts: string[];
   /** Ability ids in slot order; the first is the base attack (also used by walking into an enemy). */
   abilities: string[];
   passives: string[];
@@ -110,6 +114,8 @@ export type RoomKind = 'combat' | 'elite' | 'rest' | 'boss';
 export interface DoorOffer {
   readonly door: number;
   readonly reward: RewardKind;
+  /** Altars: whose. */
+  readonly patron?: string;
 }
 
 /** One reward option on the pick-1-of-3 screen. */
@@ -118,6 +124,7 @@ export type RewardOption =
   | { readonly kind: 'modifier'; readonly id: string }
   | { readonly kind: 'item'; readonly id: string }
   | { readonly kind: 'class'; readonly id: string }
+  | { readonly kind: 'gift'; readonly id: string }
   | { readonly kind: 'upgrade'; readonly abilityId: string; readonly upgrade: UpgradeKind };
 
 /** Run journal entries (for the results screen now, analytics later). */
@@ -139,6 +146,11 @@ export interface RunState {
   phase: 'combat' | 'reward' | 'doors' | 'won' | 'lost';
   /** Reward for clearing the current room (from the door taken into it). */
   pending: RewardKind | null;
+  /** For an altar room: whose altar. */
+  patron: string | null;
+  altars: number;
+  /** Debug: the next doors include an altar. */
+  forceAltar: boolean;
   /** The options on screen while choosing. */
   offer: RewardOption[];
   doors: DoorOffer[];
@@ -199,6 +211,8 @@ export function createPlayer(id: string, classId: string, x: number, y: number, 
     hybrid: null,
     items: [],
     ruleUses: [],
+    turnUses: [],
+    gifts: [],
     x,
     y,
     dir,
@@ -235,6 +249,9 @@ export function createGame(seed: number, opts: CreateGameOptions = {}): GameStat
       kind: 'combat',
       phase: 'combat',
       pending: 'ability',
+      patron: null,
+      altars: 0,
+      forceAltar: false,
       offer: [],
       doors: [],
       elites: 0,

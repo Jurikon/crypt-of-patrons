@@ -4,7 +4,7 @@ import type { CombatState, DoorOffer, Intent, RewardOption, RoomKind, Side } fro
 /** Movement relative to where the player faces. */
 export type MoveDir = 'forward' | 'back' | 'left' | 'right';
 export type TurnDir = 'left' | 'right';
-export type DebugAction = 'killAll' | 'heal' | 'toggleGod' | 'toBoss';
+export type DebugAction = 'killAll' | 'heal' | 'toggleGod' | 'toBoss' | 'altarNext';
 
 /** Serializable intents. Input produces these; only `apply` turns them into state changes. */
 export type Command =
@@ -20,6 +20,8 @@ export type Command =
   | { readonly type: 'debugModifier'; readonly playerId: string; readonly modifierId: string }
   /** Debug: give or take away an item. */
   | { readonly type: 'debugItem'; readonly playerId: string; readonly itemId: string }
+  /** Debug: give or take away a patron gift. */
+  | { readonly type: 'debugGift'; readonly playerId: string; readonly giftId: string }
   /** Debug: add a second class (as Initiation would). */
   | { readonly type: 'debugClass'; readonly playerId: string; readonly classId: string }
   /**
@@ -133,5 +135,5 @@ export type GameEvent =
   | { readonly type: 'hybridFormed'; readonly unitId: string; readonly hybrid: string }
   /** A blinded enemy's telegraphed attack went nowhere. */
   | { readonly type: 'missed'; readonly unitId: string }
-  | { readonly type: 'debug'; readonly action: DebugAction | 'grant' | 'modifier' | 'item' | 'class' }
+  | { readonly type: 'debug'; readonly action: DebugAction | 'grant' | 'modifier' | 'item' | 'class' | 'gift' }
   | { readonly type: 'rejected'; readonly reason: RejectReason };

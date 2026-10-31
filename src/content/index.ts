@@ -1,4 +1,14 @@
-import type { AbilityDef, ClassDef, EnemyDef, HybridDef, RuleDef, StatusDef, SummonDef, SurfaceDef } from './types';
+import type {
+  AbilityDef,
+  ClassDef,
+  EnemyDef,
+  HybridDef,
+  PatronDef,
+  RuleDef,
+  StatusDef,
+  SummonDef,
+  SurfaceDef,
+} from './types';
 
 export type * from './types';
 
@@ -539,6 +549,7 @@ export const STATUSES: readonly StatusDef[] = [
   {
     id: 'bleed',
     nameKey: 'status.bleed',
+    debuff: true,
     icon: '🩸',
     stats: [],
     triggers: [
@@ -555,6 +566,7 @@ export const STATUSES: readonly StatusDef[] = [
   {
     id: 'poison',
     nameKey: 'status.poison',
+    debuff: true,
     icon: '🧪',
     stats: [],
     stacks: true,
@@ -569,6 +581,7 @@ export const STATUSES: readonly StatusDef[] = [
   {
     id: 'burning',
     nameKey: 'status.burning',
+    debuff: true,
     icon: '🔥',
     stats: [],
     triggers: [{ on: 'turnEnd', subject: 'owner', effects: [{ kind: 'damage', amount: 1, to: { kind: 'self' } }] }],
@@ -576,13 +589,14 @@ export const STATUSES: readonly StatusDef[] = [
   {
     id: 'curse',
     nameKey: 'status.curse',
+    debuff: true,
     icon: '💀',
     stats: [{ stat: 'damageTaken', add: 1 }],
     triggers: [],
     jumps: true,
   },
-  { id: 'daze', nameKey: 'status.daze', icon: '🌀', stats: [], triggers: [], rooted: true },
-  { id: 'blind', nameKey: 'status.blind', icon: '🌫', stats: [], triggers: [], blind: true },
+  { id: 'daze', nameKey: 'status.daze', icon: '🌀', debuff: true, stats: [], triggers: [], rooted: true },
+  { id: 'blind', nameKey: 'status.blind', icon: '🌫', debuff: true, stats: [], triggers: [], blind: true },
   { id: 'guard', nameKey: 'status.guard', icon: '⛨', stats: [], triggers: [], frontGuard: true },
   {
     id: 'rage',
@@ -617,6 +631,8 @@ export const STATUSES: readonly StatusDef[] = [
       },
     ],
   },
+  /** A counter for "every third blow" gifts: grows with each blow, spent when it pays out. */
+  { id: 'charge', nameKey: 'status.charge', icon: '🔋', stats: [], triggers: [], stacks: true },
   {
     id: 'fading',
     nameKey: 'status.fading',
@@ -625,17 +641,18 @@ export const STATUSES: readonly StatusDef[] = [
     triggers: [],
     onExpire: [{ kind: 'kill', to: { kind: 'self' } }],
   },
-  { id: 'stun', nameKey: 'status.stun', icon: '💫', stats: [], triggers: [], stun: true },
-  { id: 'mark', nameKey: 'status.mark', icon: '🎯', stats: [], triggers: [] },
+  { id: 'stun', nameKey: 'status.stun', icon: '💫', debuff: true, stats: [], triggers: [], stun: true },
+  { id: 'mark', nameKey: 'status.mark', icon: '🎯', debuff: true, stats: [], triggers: [] },
   {
     id: 'vulnerable',
     nameKey: 'status.vulnerable',
+    debuff: true,
     icon: '💔',
     stats: [{ stat: 'damageTaken', add: 1 }],
     triggers: [],
   },
   { id: 'shield', nameKey: 'status.shield', icon: '🛡', stats: [], triggers: [], shield: true },
-  { id: 'taunt', nameKey: 'status.taunt', icon: '❗', stats: [], triggers: [], taunt: true },
+  { id: 'taunt', nameKey: 'status.taunt', icon: '❗', debuff: true, stats: [], triggers: [], taunt: true },
 ];
 
 /** Surfaces that keep hurting whoever stands in them (stepping in, or ending a turn there). */
@@ -842,6 +859,482 @@ export const ITEMS: readonly RuleDef[] = [
   },
 ];
 
+/** Lightning damage: tagged so rules can react to it (the Firestorm duo gift sets things alight). */
+const ZAP = ['lightning'] as const;
+const FIRE = ['fire'] as const;
+
+/** Patron gifts (GDD 2): rules like modifiers, each belonging to a patron; duo gifts need two patrons. */
+export const GIFTS: readonly RuleDef[] = [
+  // ---- Morra, Queen of Plague: poison and spreading ----
+  {
+    id: 'gift.morra.plagueStrike',
+    nameKey: 'gift.morra.plagueStrike',
+    patron: 'morra',
+    stats: [],
+    triggers: [
+      {
+        on: 'hit',
+        actor: 'owner',
+        tags: ['basic'],
+        effects: [{ kind: 'status', status: 'poison', turns: 3, amount: 1, to: { kind: 'subject' } }],
+      },
+    ],
+  },
+  {
+    id: 'gift.morra.contagion',
+    nameKey: 'gift.morra.contagion',
+    patron: 'morra',
+    stats: [],
+    triggers: [
+      {
+        on: 'death',
+        subject: 'foe',
+        effects: [{ kind: 'spreadStatuses', to: { kind: 'around', center: 'subject', radius: 1, filter: 'foes' } }],
+      },
+    ],
+  },
+  {
+    id: 'gift.morra.miasma',
+    nameKey: 'gift.morra.miasma',
+    patron: 'morra',
+    requiresStatus: 'poison',
+    stats: [],
+    triggers: [
+      {
+        on: 'death',
+        subject: 'foe',
+        subjectStatus: 'poison',
+        effects: [{ kind: 'surface', surface: 'poisonCloud', at: 'subject', turns: 3 }],
+      },
+    ],
+  },
+  {
+    id: 'gift.morra.rottenBlood',
+    nameKey: 'gift.morra.rottenBlood',
+    patron: 'morra',
+    requiresStatus: 'poison',
+    stats: [{ stat: 'stackBonus', add: 1 }],
+    triggers: [],
+  },
+  {
+    id: 'gift.morra.pestilence',
+    nameKey: 'gift.morra.pestilence',
+    patron: 'morra',
+    stats: [],
+    triggers: [
+      {
+        on: 'roomStart',
+        effects: [
+          {
+            kind: 'status',
+            status: 'poison',
+            turns: 4,
+            amount: 2,
+            to: { kind: 'nearest', center: 'self', filter: 'foes', count: 2 },
+          },
+        ],
+      },
+    ],
+  },
+
+  // ---- Velkar, Lord of the Storm: chains and movement ----
+  {
+    id: 'gift.velkar.thunderPush',
+    nameKey: 'gift.velkar.thunderPush',
+    patron: 'velkar',
+    requires: ['push'],
+    stats: [],
+    triggers: [
+      {
+        on: 'enterCell',
+        actor: 'owner',
+        subject: 'foe',
+        tags: ['push'],
+        effectTags: ZAP,
+        effects: [{ kind: 'damage', amount: 1, to: { kind: 'around', center: 'subject', radius: 1, filter: 'foes' } }],
+      },
+    ],
+  },
+  {
+    id: 'gift.velkar.discharge',
+    nameKey: 'gift.velkar.discharge',
+    patron: 'velkar',
+    stats: [],
+    triggers: [
+      {
+        on: 'kill',
+        actor: 'owner',
+        effectTags: ZAP,
+        effects: [{ kind: 'damage', amount: 1, to: { kind: 'nearest', center: 'subject', filter: 'foes', count: 2 } }],
+      },
+    ],
+  },
+  {
+    id: 'gift.velkar.stormStep',
+    nameKey: 'gift.velkar.stormStep',
+    patron: 'velkar',
+    requires: ['movement'],
+    stats: [],
+    triggers: [
+      {
+        on: 'moved',
+        actor: 'owner',
+        tags: ['movement'],
+        effectTags: ZAP,
+        effects: [{ kind: 'damage', amount: 1, to: { kind: 'around', center: 'self', radius: 1, filter: 'foes' } }],
+      },
+    ],
+  },
+  {
+    id: 'gift.velkar.tailwind',
+    nameKey: 'gift.velkar.tailwind',
+    patron: 'velkar',
+    stats: [],
+    triggers: [{ on: 'roomStart', effects: [{ kind: 'freeAction' }, { kind: 'freeAction' }] }],
+  },
+  {
+    id: 'gift.velkar.staticCharge',
+    nameKey: 'gift.velkar.staticCharge',
+    patron: 'velkar',
+    stats: [],
+    triggers: [
+      // Two blows charge it; the third stuns and spends the charge.
+      {
+        on: 'hit',
+        actor: 'owner',
+        tags: ['basic'],
+        ownerStatusAtLeast: { status: 'charge', amount: 2 },
+        effects: [
+          { kind: 'status', status: 'stun', turns: 1, to: { kind: 'subject' } },
+          { kind: 'removeStatus', status: 'charge', to: { kind: 'self' } },
+        ],
+      },
+      {
+        on: 'hit',
+        actor: 'owner',
+        tags: ['basic'],
+        effects: [{ kind: 'status', status: 'charge', turns: 99, amount: 1, to: { kind: 'self' } }],
+      },
+    ],
+  },
+
+  // ---- Silas the Faceless: corpses, summons, sacrifice ----
+  {
+    id: 'gift.silas.retinue',
+    nameKey: 'gift.silas.retinue',
+    patron: 'silas',
+    stats: [],
+    triggers: [
+      { on: 'roomStart', effects: [{ kind: 'summon', unit: 'necro.skeleton', at: { near: 'self', radius: 2 } }] },
+    ],
+  },
+  {
+    id: 'gift.silas.boneToBone',
+    nameKey: 'gift.silas.boneToBone',
+    patron: 'silas',
+    requires: ['summon'],
+    stats: [{ stat: 'summonHp', add: 1 }],
+    triggers: [],
+  },
+  {
+    id: 'gift.silas.feast',
+    nameKey: 'gift.silas.feast',
+    patron: 'silas',
+    requires: ['summon'],
+    stats: [],
+    triggers: [{ on: 'death', subject: 'ownSummon', effects: [{ kind: 'heal', amount: 1, to: { kind: 'self' } }] }],
+  },
+  {
+    id: 'gift.silas.graveHarvest',
+    nameKey: 'gift.silas.graveHarvest',
+    patron: 'silas',
+    stats: [],
+    triggers: [{ on: 'death', subject: 'foe', effects: [{ kind: 'surface', surface: 'corpse', at: 'subject' }] }],
+  },
+  {
+    id: 'gift.silas.legion',
+    nameKey: 'gift.silas.legion',
+    patron: 'silas',
+    requires: ['summon'],
+    stats: [{ stat: 'extraSummons', add: 1 }],
+    triggers: [],
+  },
+
+  // ---- Ingrid, the Ice Widow: control and shields ----
+  {
+    id: 'gift.ingrid.iceVerdict',
+    nameKey: 'gift.ingrid.iceVerdict',
+    patron: 'ingrid',
+    requires: ['push'],
+    stats: [],
+    triggers: [
+      {
+        on: 'collide',
+        actor: 'owner',
+        subjectStatus: 'stun',
+        effects: [{ kind: 'damage', amount: 2, to: { kind: 'subject' } }],
+      },
+    ],
+  },
+  {
+    id: 'gift.ingrid.hoarfrost',
+    nameKey: 'gift.ingrid.hoarfrost',
+    patron: 'ingrid',
+    stats: [],
+    triggers: [{ on: 'roomStart', effects: [{ kind: 'shield', amount: 3, turns: 99, to: { kind: 'self' } }] }],
+  },
+  {
+    id: 'gift.ingrid.coldTrail',
+    nameKey: 'gift.ingrid.coldTrail',
+    patron: 'ingrid',
+    requires: ['push'],
+    stats: [],
+    triggers: [
+      {
+        on: 'pushed',
+        actor: 'owner',
+        subject: 'foe',
+        effects: [{ kind: 'surface', surface: 'ice', at: 'from', turns: 5 }],
+      },
+    ],
+  },
+  {
+    id: 'gift.ingrid.frostbite',
+    nameKey: 'gift.ingrid.frostbite',
+    patron: 'ingrid',
+    requiresSurface: 'ice',
+    stats: [],
+    triggers: [
+      {
+        on: 'hit',
+        actor: 'owner',
+        subjectSurface: 'ice',
+        effects: [{ kind: 'status', status: 'stun', turns: 1, to: { kind: 'subject' } }],
+      },
+    ],
+  },
+  {
+    id: 'gift.ingrid.widowVeil',
+    nameKey: 'gift.ingrid.widowVeil',
+    patron: 'ingrid',
+    stats: [],
+    triggers: [
+      {
+        on: 'damaged',
+        subject: 'owner',
+        oncePerTurn: true,
+        effects: [{ kind: 'shield', amount: 1, turns: 3, to: { kind: 'self' } }],
+      },
+    ],
+  },
+
+  // ---- Ashtar, the Ash Judge: fire on cells, explosions ----
+  {
+    id: 'gift.ashtar.judgementFire',
+    nameKey: 'gift.ashtar.judgementFire',
+    patron: 'ashtar',
+    requires: ['area'],
+    stats: [],
+    triggers: [
+      {
+        on: 'hit',
+        actor: 'owner',
+        tags: ['area'],
+        effects: [{ kind: 'surface', surface: 'fire', at: 'subject', turns: 3 }],
+      },
+    ],
+  },
+  {
+    id: 'gift.ashtar.pyre',
+    nameKey: 'gift.ashtar.pyre',
+    patron: 'ashtar',
+    stats: [],
+    triggers: [
+      { on: 'death', subject: 'foe', effects: [{ kind: 'surface', surface: 'fire', at: 'subject', turns: 3 }] },
+    ],
+  },
+  {
+    id: 'gift.ashtar.searingBlood',
+    nameKey: 'gift.ashtar.searingBlood',
+    patron: 'ashtar',
+    requiresStatus: 'burning',
+    stats: [],
+    triggers: [
+      {
+        on: 'turnEnd',
+        subject: 'foe',
+        subjectStatus: 'burning',
+        effectTags: FIRE,
+        effects: [{ kind: 'damage', amount: 1, to: { kind: 'subject' } }],
+      },
+    ],
+  },
+  {
+    id: 'gift.ashtar.ashBurst',
+    nameKey: 'gift.ashtar.ashBurst',
+    patron: 'ashtar',
+    requiresStatus: 'burning',
+    stats: [],
+    triggers: [
+      {
+        on: 'death',
+        subject: 'foe',
+        subjectStatus: 'burning',
+        effectTags: FIRE,
+        effects: [
+          {
+            kind: 'damage',
+            amount: 2,
+            to: { kind: 'around', center: 'subject', radius: 1, filter: 'notAlliedPlayers' },
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'gift.ashtar.torchbearer',
+    nameKey: 'gift.ashtar.torchbearer',
+    patron: 'ashtar',
+    stats: [],
+    triggers: [
+      {
+        on: 'hit',
+        actor: 'owner',
+        tags: ['basic'],
+        effects: [{ kind: 'status', status: 'burning', turns: 2, to: { kind: 'subject' } }],
+      },
+    ],
+  },
+
+  // ---- Duo gifts ----
+  {
+    id: 'duo.plagueDead',
+    nameKey: 'duo.plagueDead',
+    patrons: ['morra', 'silas'],
+    stats: [],
+    triggers: [
+      {
+        on: 'hit',
+        actor: 'ownSummon',
+        effects: [{ kind: 'status', status: 'poison', turns: 3, amount: 1, to: { kind: 'subject' } }],
+      },
+      {
+        on: 'death',
+        subject: 'ownSummon',
+        effects: [{ kind: 'surface', surface: 'poisonCloud', at: 'subject', radius: 1, turns: 3 }],
+      },
+    ],
+  },
+  {
+    id: 'duo.firestorm',
+    nameKey: 'duo.firestorm',
+    patrons: ['velkar', 'ashtar'],
+    stats: [],
+    triggers: [
+      {
+        on: 'damaged',
+        actor: 'owner',
+        subject: 'foe',
+        tags: ['lightning'],
+        effects: [{ kind: 'status', status: 'burning', turns: 2, to: { kind: 'subject' } }],
+      },
+    ],
+  },
+  {
+    id: 'duo.iceStorm',
+    nameKey: 'duo.iceStorm',
+    patrons: ['ingrid', 'velkar'],
+    stats: [],
+    triggers: [
+      {
+        on: 'enterCell',
+        actor: 'owner',
+        subject: 'foe',
+        tags: ['push'],
+        subjectSurface: 'ice',
+        effectTags: ZAP,
+        effects: [
+          { kind: 'damage', amount: 1, to: { kind: 'subject' } },
+          { kind: 'status', status: 'stun', turns: 1, to: { kind: 'subject' } },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'duo.plagueFlame',
+    nameKey: 'duo.plagueFlame',
+    patrons: ['ashtar', 'morra'],
+    stats: [],
+    triggers: [
+      {
+        on: 'turnEnd',
+        subject: 'foe',
+        subjectStatus: 'burning',
+        effects: [{ kind: 'status', status: 'poison', turns: 3, amount: 1, to: { kind: 'subject' } }],
+      },
+    ],
+  },
+  {
+    id: 'duo.iceGuardians',
+    nameKey: 'duo.iceGuardians',
+    patrons: ['silas', 'ingrid'],
+    stats: [],
+    triggers: [
+      {
+        on: 'hit',
+        actor: 'ownSummon',
+        effects: [{ kind: 'status', status: 'stun', turns: 1, to: { kind: 'subject' } }],
+      },
+    ],
+  },
+];
+
+const giftsOf = (patron: string) => GIFTS.filter((g) => g.patron === patron).map((g) => g.id);
+
+/** The dark pantheon (GDD 2). */
+export const PATRONS: readonly PatronDef[] = [
+  {
+    id: 'morra',
+    nameKey: 'patron.morra',
+    color: 0x8ac040,
+    icon: '☣',
+    voiceKey: 'voice.morra',
+    gifts: giftsOf('morra'),
+  },
+  {
+    id: 'velkar',
+    nameKey: 'patron.velkar',
+    color: 0x60c8ff,
+    icon: '⚡',
+    voiceKey: 'voice.velkar',
+    gifts: giftsOf('velkar'),
+  },
+  {
+    id: 'silas',
+    nameKey: 'patron.silas',
+    color: 0xe8dcc0,
+    icon: '☠',
+    voiceKey: 'voice.silas',
+    gifts: giftsOf('silas'),
+  },
+  {
+    id: 'ingrid',
+    nameKey: 'patron.ingrid',
+    color: 0xb8e8ff,
+    icon: '❄',
+    voiceKey: 'voice.ingrid',
+    gifts: giftsOf('ingrid'),
+  },
+  {
+    id: 'ashtar',
+    nameKey: 'patron.ashtar',
+    color: 0xff8a30,
+    icon: '♨',
+    voiceKey: 'voice.ashtar',
+    gifts: giftsOf('ashtar'),
+  },
+];
+
 /** Hybrids: two classes together give a new name and a feature (the owner's idea). */
 export const HYBRIDS: readonly HybridDef[] = [
   {
@@ -977,6 +1470,10 @@ export const ACT = {
   maxElites: 2,
   /** Treasure doors at most per act. */
   maxTreasures: 1,
+  /** Altars at most per act; the first is guaranteed in rooms 2–3. */
+  maxAltars: 3,
+  /** Chance a duo gift takes the third card on an altar when it is unlocked. */
+  duoChance: 0.5,
   /** Rooms (1-based) in which the Initiation door shows up, once per act. */
   initiationFrom: 1,
   initiationBy: 3,
@@ -991,7 +1488,7 @@ export const ACT = {
 
 /** How often each kind of reward shows up on doors (only kinds still available are drawn). */
 export const DOOR_WEIGHTS: readonly {
-  readonly kind: 'ability' | 'modifier' | 'upgrade' | 'rest' | 'elite' | 'treasure';
+  readonly kind: 'ability' | 'modifier' | 'upgrade' | 'rest' | 'elite' | 'treasure' | 'altar';
   readonly weight: number;
 }[] = [
   { kind: 'ability', weight: 3 },
@@ -1000,6 +1497,7 @@ export const DOOR_WEIGHTS: readonly {
   { kind: 'rest', weight: 2 },
   { kind: 'elite', weight: 1 },
   { kind: 'treasure', weight: 1 },
+  { kind: 'altar', weight: 2 },
 ];
 
 /** Encounter size by depth in the act: weights for 2, 3, 4, 5 enemies. */
@@ -1047,5 +1545,7 @@ export const getSurface = byId(SURFACES, 'surface');
 export const getSummon = byId(SUMMONS, 'summon');
 export const getItem = byId(ITEMS, 'item');
 export const getHybrid = byId(HYBRIDS, 'hybrid');
+export const getGift = byId(GIFTS, 'gift');
+export const getPatron = byId(PATRONS, 'patron');
 export const getClass = byId(CLASSES, 'class');
 export const getEnemy = byId(ENEMIES, 'enemy');

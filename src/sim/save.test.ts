@@ -39,15 +39,17 @@ describe('saves', () => {
 
   it('migrates a version-6 save (before second classes and items)', () => {
     const v7 = createGame(4, { classId: 'rogue' });
-    const { initiation: _i, treasures: _t, ...run } = v7.run!;
+    const { initiation: _i, treasures: _t, patron: _p, altars: _a, forceAltar: _f, ...run } = v7.run!;
     const v6 = {
       ...v7,
       version: 6,
       run,
-      players: v7.players.map(({ classes: _c, hybrid: _h, items: _it, ruleUses: _r, ...p }) => p),
+      players: v7.players.map(
+        ({ classes: _c, hybrid: _h, items: _it, ruleUses: _r, gifts: _g, turnUses: _tu, ...p }) => p,
+      ),
     };
     const migrated = migrateState(JSON.parse(JSON.stringify(v6)))!;
-    expect(migrated.version).toBe(7);
+    expect(migrated.version).toBe(8);
     expect(migrated.players[0]).toMatchObject({ classes: ['rogue'], hybrid: null, items: [], ruleUses: [] });
     expect(migrated.run).toMatchObject({ initiation: false, treasures: 0 });
   });

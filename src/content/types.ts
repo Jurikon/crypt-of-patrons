@@ -5,7 +5,21 @@
  */
 
 /** Action tags (GDD 2). Abilities carry them; events inherit the tags of the action that caused them. */
-export type Tag = 'melee' | 'projectile' | 'area' | 'movement' | 'push' | 'summon' | 'curse' | 'defense';
+export type Tag =
+  | 'melee'
+  | 'projectile'
+  | 'area'
+  | 'movement'
+  | 'push'
+  | 'summon'
+  | 'curse'
+  | 'defense'
+  /** The hero's base attack (slot 1), whatever ability it is. */
+  | 'basic'
+  /** Damage from lightning (patron gifts). */
+  | 'lightning'
+  /** Damage from fire (patron gifts). */
+  | 'fire';
 
 /** Which units a group selection keeps, relative to the acting unit's side. */
 export type UnitFilter =
@@ -36,8 +50,13 @@ export type UnitSelector =
     }
   /** Everyone on the cell in front of the actor and the two cells beside it (a sweeping blow). */
   | { readonly kind: 'frontRow' }
-  /** The single nearest unit to a centre (not on it) that passes the filter. */
-  | { readonly kind: 'nearest'; readonly center: 'target' | 'self' | 'subject'; readonly filter: UnitFilter }
+  /** The nearest units to a centre (not on it) that pass the filter: one, or `count`. */
+  | {
+      readonly kind: 'nearest';
+      readonly center: 'target' | 'self' | 'subject';
+      readonly filter: UnitFilter;
+      readonly count?: number;
+    }
   /** The unit right behind the subject (triggers) or the target, seen from the actor: a blow that goes through. */
   | { readonly kind: 'beyond' };
 
@@ -98,6 +117,8 @@ export type EffectSpec =
       readonly consumes?: readonly string[];
     }
   | { readonly kind: 'removeStatus'; readonly status: string; readonly to?: UnitSelector }
+  /** Copies the harmful statuses the subject had (triggers) onto the selected units. */
+  | { readonly kind: 'spreadStatuses'; readonly to: UnitSelector }
   /** Shifts every cooldown of the owner by `delta` turns (negative = sooner). */
   | { readonly kind: 'cooldowns'; readonly delta: number }
   /** Changes the owner's maximum health (and keeps health within it). */
@@ -170,7 +191,11 @@ export type StatId =
   /** Extra damage dealt by summons standing next to their owner. */
   | 'auraDamage'
   /** Extra copies of every upgrade reward. */
-  | 'upgradeBonus';
+  | 'upgradeBonus'
+  /** Extra strength on every stacking status this unit applies (poison). */
+  | 'stackBonus'
+  /** Extra health for every summon. */
+  | 'summonHp';
 
 export interface StatMod {
   readonly stat: StatId;
@@ -215,6 +240,14 @@ export interface TriggerDef {
   readonly oncePerRoom?: boolean;
   /** Only hits from behind. */
   readonly backstab?: boolean;
+  /** Only once per turn. */
+  readonly oncePerTurn?: boolean;
+  /** The owner holds at least this much of a status (counters built from stacking statuses). */
+  readonly ownerStatusAtLeast?: { readonly status: string; readonly amount: number };
+  /** The subject stood on this surface. */
+  readonly subjectSurface?: string;
+  /** Tags the effects carry (lightning, fire), so other rules can react to them. */
+  readonly effectTags?: readonly Tag[];
   readonly effects: readonly EffectSpec[];
 }
 
@@ -234,6 +267,24 @@ export interface RuleDef {
   readonly requires?: readonly Tag[];
   /** Only offered when the hero has some way to put this status on enemies. */
   readonly requiresStatus?: string;
+  /** Only offered when the hero has some way to make this surface. */
+  readonly requiresSurface?: string;
+  /** Patron gifts: whose gift it is. */
+  readonly patron?: string;
+  /** Duo gifts: the two patrons whose gifts unlock it. */
+  readonly patrons?: readonly [string, string];
+}
+
+/** A patron of the dark pantheon (GDD 2): colour, sign, a line of voice, and their gifts. */
+export interface PatronDef {
+  readonly id: string;
+  readonly nameKey: string;
+  /** Altar and card colour. */
+  readonly color: number;
+  readonly icon: string;
+  /** Said when one of their gifts is taken. */
+  readonly voiceKey: string;
+  readonly gifts: readonly string[];
 }
 
 /** Two classes together become a hybrid with its own name and feature (an idea of the owner, M4). */
@@ -271,6 +322,8 @@ export interface StatusDef {
   readonly jumps?: boolean;
   /** Effects run on the holder when the status runs out. */
   readonly onExpire?: readonly EffectSpec[];
+  /** Harmful: it spreads with spreading effects. */
+  readonly debuff?: boolean;
 }
 
 export interface SurfaceDef {
@@ -351,7 +404,9 @@ export type RewardKind =
   /** A second class (GDD 2). */
   | 'initiation'
   /** Pick an item. */
-  | 'treasure';
+  | 'treasure'
+  /** A patron's altar: pick one of their gifts. */
+  | 'altar';
 
 /** Ability upgrades (a general reward, M3): faster cooldown or one more damage on every hit. */
 export type UpgradeKind = 'cooldown' | 'damage';

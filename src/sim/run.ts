@@ -6,9 +6,12 @@ import {
   DOOR_WEIGHTS,
   getAbility,
   getClass,
+  getGift,
   getItem,
   getModifier,
+  GIFTS,
   HYBRIDS,
+  PATRONS,
   ITEMS,
   MODIFIERS,
   type EffectSpec,
@@ -77,7 +80,42 @@ function fits(p: Player, rule: RuleDef): boolean {
   }
   if (rule.requiresStatus && !effects.some((e) => e.kind === 'status' && e.status === rule.requiresStatus))
     return false;
+  if (rule.requiresSurface && !effects.some((e) => e.kind === 'surface' && e.surface === rule.requiresSurface))
+    return false;
   return true;
+}
+
+/**
+ * Gifts an altar of `patron` offers: three of theirs not taken yet (ones that fit the build first, then
+ * any), and, once the hero holds gifts of two patrons, sometimes their duo gift as the third card.
+ */
+function altarOffer(rng: Rng, p: Player, patron: string): RewardOption[] {
+  const own = GIFTS.filter((g) => g.patron === patron && !p.gifts.includes(g.id));
+  const fitting = shuffle(
+    rng,
+    own.filter((g) => fits(p, g)),
+  );
+  const rest = shuffle(
+    rng,
+    own.filter((g) => !fits(p, g)),
+  );
+  const picks = [...fitting, ...rest].slice(0, ACT.offer).map((g) => ({ kind: 'gift' as const, id: g.id }));
+  const patronsHeld = new Set(p.gifts.map((id) => getGift(id).patron).filter((x): x is string => !!x));
+  const duo = GIFTS.find(
+    (g) => g.patrons?.includes(patron) && g.patrons.every((x) => patronsHeld.has(x)) && !p.gifts.includes(g.id),
+  );
+  if (duo && float(rng) < ACT.duoChance) {
+    if (picks.length >= ACT.offer) picks[ACT.offer - 1] = { kind: 'gift', id: duo.id };
+    else picks.push({ kind: 'gift', id: duo.id });
+  }
+  return picks;
+}
+
+/** A patron for a new altar: one who still has a gift that fits, chosen by the seed. */
+function pickPatron(rng: Rng, p: Player): string {
+  const open = PATRONS.filter((pt) => GIFTS.some((g) => g.patron === pt.id && !p.gifts.includes(g.id) && fits(p, g)));
+  const pool = open.length ? open : PATRONS;
+  return (pool[Math.floor(float(rng) * pool.length)] ?? PATRONS[0]!).id;
 }
 
 const newModifiers = (p: Player) => MODIFIERS.filter((m) => !p.modifiers.includes(m.id) && fits(p, m)).map((m) => m.id);
@@ -139,7 +177,8 @@ export function upgradedEffects(p: Player, abilityId: string): readonly EffectSp
 }
 
 /** Up to ACT.offer options for a reward; missing abilities or modifiers are filled with upgrades. */
-function makeOffer(rng: Rng, p: Player, reward: RewardKind): RewardOption[] {
+function makeOffer(rng: Rng, p: Player, reward: RewardKind, patron: string | null = null): RewardOption[] {
+  if (reward === 'altar') return patron ? altarOffer(rng, p, patron) : [];
   const picks: RewardOption[] = [];
   if (reward === 'ability') for (const id of shuffle(rng, newAbilities(p))) picks.push({ kind: 'ability', id });
   if (reward === 'modifier') for (const id of shuffle(rng, newModifiers(p))) picks.push({ kind: 'modifier', id });
@@ -173,7 +212,7 @@ export function roomCleared(state: GameState, events: GameEvent[]): void {
     return;
   }
   if (run.pending) {
-    run.offer = makeOffer(rngFor(state, 'reward'), p, run.pending);
+    run.offer = makeOffer(rngFor(state, 'reward'), p, run.pending, run.patron);
     run.pending = null;
     if (run.offer.length > 0) {
       run.phase = 'reward';
@@ -222,6 +261,7 @@ function openDoors(state: GameState, events: GameEvent[]): void {
         return run.elites < ACT.maxElites && run.depth >= 2 && run.kind !== 'elite' && newItems(p).length > 0;
       if (w.kind === 'treasure') return run.treasures < ACT.maxTreasures && run.depth >= 2 && newItems(p).length > 0;
       if (w.kind === 'rest') return run.depth >= 2 && run.kind !== 'rest';
+      if (w.kind === 'altar') return run.altars < ACT.maxAltars && run.depth >= 2;
       return true;
     });
     const used = new Set<RewardKind>();
@@ -231,11 +271,21 @@ function openDoors(state: GameState, events: GameEvent[]): void {
       otherClasses(p).length > 0 &&
       run.depth >= ACT.initiationFrom &&
       (run.depth >= ACT.initiationBy || float(rng) < 0.5);
+    // The first altar is guaranteed in rooms 2–3 (so offered when leaving room 1 or 2).
+    const altarNow = run.forceAltar || (run.altars === 0 && run.depth <= 2 && (run.depth === 2 || float(rng) < 0.5));
+    run.forceAltar = false;
+    let altarPlaced = false;
     for (const [n, x] of exits.entries()) {
       if (initiate && n === 0) {
         run.initiation = true;
         used.add('initiation');
         doors.push({ door: x.i, reward: 'initiation' });
+        continue;
+      }
+      if (altarNow && !altarPlaced) {
+        altarPlaced = true;
+        used.add('altar');
+        doors.push({ door: x.i, reward: 'altar', patron: pickPatron(rng, p) });
         continue;
       }
       const fresh = available.filter((w) => !used.has(w.kind));
@@ -247,7 +297,9 @@ function openDoors(state: GameState, events: GameEvent[]): void {
           )
         : 'upgrade';
       used.add(kind);
-      doors.push({ door: x.i, reward: kind });
+      doors.push(
+        kind === 'altar' ? { door: x.i, reward: kind, patron: pickPatron(rng, p) } : { door: x.i, reward: kind },
+      );
     }
   }
   run.doors = doors;
@@ -275,7 +327,10 @@ export function chooseReward(eng: Engine, index: number | null, replace: number 
     p.items.push(option.id);
     gainRule(eng, p, getItem(option.id).onGain);
   } else if (option?.kind === 'class') addClass(eng, p, option.id);
-  else if (option?.kind === 'upgrade')
+  else if (option?.kind === 'gift') {
+    p.gifts.push(option.id);
+    gainRule(eng, p, getGift(option.id).onGain);
+  } else if (option?.kind === 'upgrade')
     for (let i = 0; i <= statOf(state, p, 'upgradeBonus'); i++)
       p.upgrades.push({ abilityId: option.abilityId, kind: option.upgrade });
   run.log.push({ type: 'reward', depth: run.depth, option: option ?? null });
@@ -307,6 +362,8 @@ export function enterDoor(state: GameState, door: number, events: GameEvent[]): 
     offer.reward === 'boss' ? 'boss' : offer.reward === 'rest' ? 'rest' : offer.reward === 'elite' ? 'elite' : 'combat';
   const pending: RewardKind | null = kind === 'combat' || kind === 'elite' ? offer.reward : null;
   if (offer.reward === 'treasure') run.treasures++;
+  if (offer.reward === 'altar') run.altars++;
+  run.patron = offer.patron ?? null;
   enterRoom(state, run.depth + 1, kind, pending, events);
 }
 
@@ -340,6 +397,7 @@ export function enterRoom(
     p.statuses = [];
     p.freeActions = 0;
     p.ruleUses = [];
+    p.turnUses = [];
     if (kind === 'rest' && p.hp > 0) p.hp = Math.min(p.maxHp, p.hp + Math.ceil(p.maxHp * ACT.restHeal));
   }
   populateRoom(state, depth, kind);

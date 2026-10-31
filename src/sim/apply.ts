@@ -5,9 +5,11 @@ import {
   ACT,
   CLASSES,
   getAbility,
+  getGift,
   getItem,
   getModifier,
   getStatus,
+  GIFTS,
   ITEMS,
   MODIFIERS,
 } from '../content';
@@ -146,6 +148,8 @@ export function apply(prev: GameState, command: Command): ApplyResult {
       } else if (command.action === 'killAll') {
         for (const e of [...state.enemies]) if (isActive(state)) killUnit(eng, e, null, []);
         settle(eng);
+      } else if (command.action === 'altarNext' && state.run) {
+        state.run.forceAltar = true;
       } else if (command.action === 'toBoss' && state.run) {
         enterRoom(state, ACT.rooms + 1, 'boss', null, events);
       }
@@ -177,6 +181,14 @@ export function apply(prev: GameState, command: Command): ApplyResult {
       player.items = had ? player.items.filter((i) => i !== command.itemId) : [...player.items, command.itemId];
       if (!had) gainRule(eng, player, getItem(command.itemId).onGain);
       events.push({ type: 'debug', action: 'item' });
+      break;
+    }
+    case 'debugGift': {
+      if (!GIFTS.some((g) => g.id === command.giftId)) return reject('unknown_command');
+      const had = player.gifts.includes(command.giftId);
+      player.gifts = had ? player.gifts.filter((g) => g !== command.giftId) : [...player.gifts, command.giftId];
+      if (!had) gainRule(eng, player, getGift(command.giftId).onGain);
+      events.push({ type: 'debug', action: 'gift' });
       break;
     }
     case 'debugClass': {
@@ -231,13 +243,9 @@ function useAbility(eng: Engine, player: Player, abilityId: string, target: Vec2
     player.dir = dir;
   }
   events.push({ type: 'abilityUsed', unitId: player.id, abilityId: ability.id, target: chosen, dir });
-  runEffects(eng, upgradedEffects(player, ability.id), {
-    source: player,
-    target: chosen,
-    dir,
-    tags: ability.tags,
-    event: null,
-  });
+  // The base attack (slot 1) carries the `basic` tag, whatever ability it is.
+  const tags = abilityId === player.abilities[0] ? [...ability.tags, 'basic' as const] : ability.tags;
+  runEffects(eng, upgradedEffects(player, ability.id), { source: player, target: chosen, dir, tags, event: null });
   settle(eng);
   return null;
 }
@@ -295,7 +303,10 @@ function worldTurn(eng: Engine): void {
 
   state.combat.turn++;
   state.combat.phase = 'player';
-  for (const p of state.players) tickCooldowns(p);
+  for (const p of state.players) {
+    tickCooldowns(p);
+    p.turnUses = [];
+  }
   events.push({ type: 'phaseChanged', phase: 'player', turn: state.combat.turn });
   emitTurn(eng, 'turnStart');
   settle(eng);

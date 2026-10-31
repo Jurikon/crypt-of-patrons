@@ -62,6 +62,8 @@ export interface TriggerEvent {
   readonly tags: readonly Tag[];
   /** The subject's statuses at that moment. */
   readonly subjectStatuses: readonly string[];
+  /** The same, with their strength (for spreading them). */
+  readonly subjectStatusList: readonly { readonly id: string; readonly turns: number; readonly amount: number }[];
   /** Where the actor stood (for blows that go through the subject). */
   readonly actorCell: Vec2 | null;
   /** A hit from behind. */
@@ -150,6 +152,7 @@ export function emit(
     from: e.from ?? null,
     tags: e.tags ?? [],
     subjectStatuses: e.subject ? e.subject.statuses.map((s) => s.id) : [],
+    subjectStatusList: e.subject ? e.subject.statuses.map(({ id, turns, amount }) => ({ id, turns, amount })) : [],
     actorCell: e.actor ? pos(e.actor) : null,
     backstab: e.backstab ?? false,
     depth: eng.depth,
@@ -231,6 +234,7 @@ export function killUnit(eng: Engine, unit: Unit, killer: Unit | null, tags: rea
   if (!isAlive(state, unit) && !(isPlayer(state, unit) && unit.hp <= 0 && !events.some(isDeathOf(unit.id)))) return;
   const ref = refOf(state, unit);
   const statuses = unit.statuses.map((s) => s.id);
+  const unitStatuses = unit.statuses.map(({ id, turns, amount }) => ({ id, turns, amount }));
   const cell = pos(unit);
   const side = sideOf(state, unit);
   const carried = unit.statuses.filter((s) => getStatus(s.id).jumps);
@@ -250,6 +254,7 @@ export function killUnit(eng: Engine, unit: Unit, killer: Unit | null, tags: rea
     from: null,
     tags,
     subjectStatuses: statuses,
+    subjectStatusList: unitStatuses,
     depth: eng.depth,
     subject: ref,
     actorCell: killer ? pos(killer) : null,
@@ -330,7 +335,9 @@ export function applyStatus(eng: Engine, unit: Unit, id: string, turns: number, 
   const inst = {
     id,
     turns: Math.max(turns, old?.turns ?? 0),
-    amount: def.stacks ? (old?.amount ?? 0) + amount : Math.max(amount, old?.amount ?? 0),
+    amount: def.stacks
+      ? (old?.amount ?? 0) + amount + statOf(state, unitById(state, sourceId), 'stackBonus')
+      : Math.max(amount, old?.amount ?? 0),
     sourceId,
   };
   unit.statuses = [...unit.statuses.filter((s) => s.id !== id), inst];
@@ -424,10 +431,10 @@ function selectUnits(eng: Engine, sel: UnitSelector | undefined, ctx: EffectCont
       const c = centerOf(ctx, s.center);
       if (!c) return [];
       const skip = ctx.event?.subject?.id;
-      const best = allUnits(state)
+      return allUnits(state)
         .filter((u) => !same(u, c) && u.id !== skip && keeps(state, s.filter, ctx.source, u))
-        .sort((a, b) => manhattan(a, c) - manhattan(b, c))[0];
-      return best ? [best] : [];
+        .sort((a, b) => manhattan(a, c) - manhattan(b, c))
+        .slice(0, s.count ?? 1);
     }
     case 'beyond': {
       // Past the subject as seen from the actor (triggers), or past the target along the action.
@@ -642,6 +649,12 @@ export function runEffects(eng: Engine, effects: readonly EffectSpec[], context:
         }
         break;
       }
+      case 'spreadStatuses': {
+        const harmful = (ctx.event?.subjectStatusList ?? []).filter((x) => getStatus(x.id).debuff);
+        for (const u of selectUnits(eng, effect.to, ctx))
+          for (const x of harmful) applyStatus(eng, u, x.id, Math.max(1, x.turns), x.amount, ctx.source.id);
+        break;
+      }
       case 'removeStatus':
         for (const u of selectUnits(eng, effect.to, ctx)) removeStatus(eng, u, effect.status);
         break;
@@ -693,8 +706,8 @@ function summonAlly(eng: Engine, unit: string, owner: Player, cell: Vec2, ctx: E
     x: cell.x,
     y: cell.y,
     dir: ctx.source.dir,
-    hp: def.maxHp,
-    maxHp: def.maxHp,
+    hp: def.maxHp + statOf(state, owner, 'summonHp'),
+    maxHp: def.maxHp + statOf(state, owner, 'summonHp'),
     statuses: [],
   };
   state.allies.push(ally);
@@ -737,7 +750,8 @@ function related(rel: Relation | undefined, ref: UnitRef | null, owner: UnitRef)
   }
 }
 
-function matches(t: TriggerDef, ev: TriggerEvent, owner: UnitRef, ownerUnit: Unit | null): boolean {
+function matches(state: GameState, t: TriggerDef, ev: TriggerEvent, owner: UnitRef, ownerUnit: Unit | null): boolean {
+  const counter = t.ownerStatusAtLeast;
   return (
     t.on === ev.on &&
     related(t.actor, ev.actor, owner) &&
@@ -746,7 +760,9 @@ function matches(t: TriggerDef, ev: TriggerEvent, owner: UnitRef, ownerUnit: Uni
     (!t.subjectStatus || ev.subjectStatuses.includes(t.subjectStatus)) &&
     (!t.backstab || ev.backstab) &&
     (t.near === undefined || (!!ownerUnit && !!ev.cell && manhattan(ownerUnit, ev.cell) <= t.near)) &&
-    (t.ownerHpAtMost === undefined || (!!ownerUnit && ownerUnit.hp <= t.ownerHpAtMost))
+    (t.ownerHpAtMost === undefined || (!!ownerUnit && ownerUnit.hp <= t.ownerHpAtMost)) &&
+    (!counter || (ownerUnit?.statuses.find((x) => x.id === counter.status)?.amount ?? 0) >= counter.amount) &&
+    (!t.subjectSurface || (!!ev.cell && !!surfaceAt(state, ev.cell, t.subjectSurface)))
   );
 }
 
@@ -770,8 +786,9 @@ function listeners(state: GameState, ev: TriggerEvent): Listener[] {
     const me = refOf(state, p);
     for (const r of playerRules(p))
       for (const t of r.triggers) {
-        if (!matches(t, ev, me, p)) continue;
+        if (!matches(state, t, ev, me, p)) continue;
         if (t.oncePerRoom && p.ruleUses.includes(r.id)) continue;
+        if (t.oncePerTurn && p.turnUses.includes(r.id)) continue;
         out.push({ owner: p, trigger: t, rule: r.id, surface: null, once: t.oncePerRoom === true });
       }
   }
@@ -779,7 +796,7 @@ function listeners(state: GameState, ev: TriggerEvent): Listener[] {
     const me = refOf(state, u);
     for (const s of u.statuses)
       for (const t of getStatus(s.id).triggers)
-        if (matches(t, ev, me, u)) out.push({ owner: u, trigger: t, rule: s.id, surface: null, once: false });
+        if (matches(state, t, ev, me, u)) out.push({ owner: u, trigger: t, rule: s.id, surface: null, once: false });
   }
   // Surfaces react to units stepping on them and to units ending a turn on them.
   if ((ev.on === 'enterCell' || ev.on === 'turnEnd') && ev.cell) {
@@ -791,7 +808,8 @@ function listeners(state: GameState, ev: TriggerEvent): Listener[] {
       const actor = s.side === 'heroes' ? state.players.find((p) => p.hp > 0) : subject;
       if (!actor) continue;
       for (const t of getSurface(s.id).triggers)
-        if (matches(t, ev, me, null)) out.push({ owner: actor, trigger: t, rule: s.id, surface: s, once: false });
+        if (matches(state, t, ev, me, null))
+          out.push({ owner: actor, trigger: t, rule: s.id, surface: s, once: false });
     }
   }
   return out;
@@ -822,11 +840,15 @@ export function settle(eng: Engine): void {
         if (l.owner.ruleUses.includes(l.rule)) continue;
         l.owner.ruleUses.push(l.rule);
       }
+      if (l.trigger.oncePerTurn && isPlayer(state, l.owner)) {
+        if (l.owner.turnUses.includes(l.rule)) continue;
+        l.owner.turnUses.push(l.rule);
+      }
       runEffects(eng, l.trigger.effects, {
         source: l.owner,
         target: ev.cell ?? pos(l.owner),
         dir: l.owner.dir,
-        tags: [],
+        tags: l.trigger.effectTags ?? [],
         event: ev,
       });
       eng.depth = saved;
