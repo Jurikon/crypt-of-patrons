@@ -5,7 +5,7 @@ import type { Command, GameEvent } from './commands';
 import { createGame, hasStatus, unitById, type GameState } from './state';
 import { stateFromMap } from './testing';
 import { validTargets } from './targeting';
-import { getAbility } from '../content';
+import { getAbility, getClass } from '../content';
 
 const use = (abilityId: string, target?: Vec2): Command =>
   target
@@ -236,7 +236,7 @@ describe('Rogue', () => {
       { ...ROGUE, abilities: ['rogue.swap'], intents: true },
     );
     const r = apply(s, use('rogue.swap', { x: 2, y: 1 }));
-    expect(r.state.players[0]).toMatchObject({ x: 2, y: 1, hp: 13 });
+    expect(r.state.players[0]).toMatchObject({ x: 2, y: 1, hp: getClass('rogue').maxHp });
     expect(of(r.events, 'enemyAttack')[0]).toMatchObject({ cells: [{ x: 2, y: 3 }] });
   });
 });

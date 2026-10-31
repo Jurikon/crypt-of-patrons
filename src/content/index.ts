@@ -1415,7 +1415,7 @@ export const CLASSES: readonly ClassDef[] = [
   {
     id: 'rogue',
     nameKey: 'class.rogue',
-    maxHp: 13,
+    maxHp: 15,
     abilities: ['rogue.dagger', 'rogue.shadowStep'],
     passives: ['rogue.backstab'],
     pool: ['rogue.knife', 'rogue.swap', 'rogue.smoke', 'rogue.poisonBlade'],

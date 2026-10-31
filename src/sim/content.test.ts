@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Vec2 } from '../core/grid';
-import { ACT, HYBRIDS, ITEMS, MODIFIERS } from '../content';
+import { ACT, getClass, HYBRIDS, ITEMS, MODIFIERS } from '../content';
 import { apply } from './apply';
 import type { Command, GameEvent } from './commands';
 import { enterRoom } from './run';
@@ -102,7 +102,7 @@ describe('new abilities', () => {
     );
     const r2 = apply(s, use('rogue.smoke', { x: 2, y: 2 }));
     expect(of(r2.events, 'missed')).toHaveLength(1);
-    expect(r2.state.players[0]!.hp).toBe(13);
+    expect(r2.state.players[0]!.hp).toBe(getClass('rogue').maxHp);
     expect(r2.state.surfaces.filter((x) => x.id === 'smoke').length).toBeGreaterThan(4);
   });
 

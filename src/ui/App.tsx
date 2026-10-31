@@ -1,9 +1,10 @@
 import { DebugOverlay, type OverlayActions } from '../debug/Overlay';
-import { t } from '../i18n';
+import { getPatron } from '../content';
+import { t, type TextKey } from '../i18n';
 import { Hud, type HudActions } from './Hud';
 import { Minimap } from './Minimap';
 import { ResultScreen, type ResultActions } from './ResultScreen';
-import { RewardScreen, type RewardActions } from './RewardScreen';
+import { cssColor, RewardScreen, type RewardActions } from './RewardScreen';
 import { StartScreen, type StartActions } from './StartScreen';
 import { useStore, type LabelsStore, type Store, type ViewState } from './store';
 import { WorldOverlay } from './WorldOverlay';
@@ -34,6 +35,9 @@ export function App({ store, labels, actions }: { store: Store<ViewState>; label
           {t('hybrid.announce', { name: view.hybridNews.name })}
         </div>
       )}
+      {view.patronVoice && now - view.patronVoice.at < 3600 && (
+        <PatronVoice key={view.patronVoice.at} patron={view.patronVoice.patron} />
+      )}
       {!view.pointerLocked && !over && !choosing && (
         <div class="prompt" data-testid="click-to-play">
           <div class="prompt-title">{t('prompt.clickToPlay')}</div>
@@ -53,6 +57,19 @@ export function ErrorScreen({ message }: { message: string }) {
   return (
     <div class="prompt prompt-error" role="alert">
       <div class="prompt-title">{message}</div>
+    </div>
+  );
+}
+
+/** The patron's line when you take their gift: "Morra: Let them rot together." */
+function PatronVoice({ patron }: { patron: string }) {
+  const p = getPatron(patron);
+  return (
+    <div class="patron-voice" style={{ '--patron': cssColor(p.color) }} data-testid="patron-voice">
+      <span class="patron-voice-name">
+        {p.icon} {t(p.nameKey as TextKey)}:
+      </span>{' '}
+      {t(p.voiceKey as TextKey)}
     </div>
   );
 }

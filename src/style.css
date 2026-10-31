@@ -1094,3 +1094,98 @@ kbd {
   position: absolute;
   inset: 0;
 }
+
+/* ---- Patrons (M5) ---- */
+.door-altar {
+  background: var(--patron, #ffffff);
+  box-shadow: 0 0 12px var(--patron, #ffffff);
+}
+
+.reward-gift {
+  border-color: var(--patron);
+  box-shadow: inset 0 0 18px color-mix(in srgb, var(--patron) 25%, transparent);
+}
+
+.reward-gift:hover {
+  border-color: var(--patron);
+  box-shadow:
+    inset 0 0 22px color-mix(in srgb, var(--patron) 35%, transparent),
+    0 0 14px color-mix(in srgb, var(--patron) 50%, transparent);
+}
+
+.reward-gift .reward-name {
+  color: var(--patron);
+}
+
+.reward-sign {
+  margin-right: 6px;
+}
+
+.reward-duo,
+.reward-duo:hover {
+  border-color: #ffd34a;
+  background: linear-gradient(160deg, rgba(70, 48, 8, 0.95), rgba(30, 18, 6, 0.95));
+  box-shadow:
+    inset 0 0 22px rgba(255, 210, 80, 0.3),
+    0 0 18px rgba(255, 200, 60, 0.45);
+}
+
+.reward-duo .reward-name {
+  color: #ffd34a;
+}
+
+.badge-duo {
+  color: #1a0c06;
+  background: #ffd34a;
+  border-color: #ffd34a;
+}
+
+.patron-voice {
+  position: absolute;
+  left: 50%;
+  top: 70%;
+  transform: translate(-50%, -50%);
+  max-width: 80vw;
+  padding: 14px 28px;
+  font-size: 22px;
+  font-style: italic;
+  color: #fff;
+  text-align: center;
+  background: rgba(10, 6, 14, 0.85);
+  border: 2px solid var(--patron);
+  box-shadow: 0 0 28px color-mix(in srgb, var(--patron) 55%, transparent);
+  animation: hybrid-news 3.6s ease-out forwards;
+  pointer-events: none;
+}
+
+.patron-voice-name {
+  font-style: normal;
+  font-weight: bold;
+  color: var(--patron);
+}
+
+.mod-patron {
+  margin-top: 4px;
+  padding-left: 6px;
+  border-left: 2px solid var(--patron);
+}
+
+.mod-patron-name {
+  color: var(--patron);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.mod-gift {
+  color: color-mix(in srgb, var(--patron) 60%, #ffffff);
+}
+
+.mod-duo {
+  color: #ffd34a;
+}
+
+.debug-group {
+  color: var(--accent);
+  font-size: 11px;
+}

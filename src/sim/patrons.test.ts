@@ -8,7 +8,9 @@ import { createGame, hasStatus, surfaceAt, unitById, type GameState } from './st
 import { stateFromMap, type MapOptions } from './testing';
 
 const use = (abilityId: string, target?: Vec2): Command =>
-  target ? { type: 'useAbility', playerId: 'p1', abilityId, target } : { type: 'useAbility', playerId: 'p1', abilityId };
+  target
+    ? { type: 'useAbility', playerId: 'p1', abilityId, target }
+    : { type: 'useAbility', playerId: 'p1', abilityId };
 const step = (dir: 'forward' | 'back' | 'left' | 'right'): Command => ({ type: 'move', playerId: 'p1', dir });
 const of = (events: readonly GameEvent[], type: GameEvent['type']) => events.filter((e) => e.type === type);
 const hp = (s: GameState, id: string) => unitById(s, id)?.hp;

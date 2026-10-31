@@ -5,7 +5,7 @@ import { detectLang, setLang, t, type TextKey } from './i18n';
 import { attachInput } from './input/input';
 import { GameRenderer, type Quality } from './render/renderer';
 import type { Vec2 } from './core/grid';
-import { CLASSES, getAbility, getHybrid } from './content';
+import { CLASSES, getAbility, getGift, getHybrid } from './content';
 import {
   apply,
   createGame,
@@ -118,6 +118,7 @@ const store = createStore<ViewState>({
   elapsedMs: 0,
   roomAt: -1e9,
   hybridNews: null,
+  patronVoice: null,
 });
 if (params.seed !== null) writeHash();
 
@@ -215,6 +216,12 @@ function run(command: Command, now: number): void {
   const formed = result.events.find((e) => e.type === 'hybridFormed');
   if (formed?.type === 'hybridFormed')
     store.set({ hybridNews: { name: t(getHybrid(formed.hybrid).nameKey as TextKey), at: now } });
+  // Taking a gift: its patron (the altar's, for a duo gift) says a line.
+  const taken = result.events.find((e) => e.type === 'rewardTaken');
+  if (taken?.type === 'rewardTaken' && taken.option?.kind === 'gift') {
+    const patron = getGift(taken.option.id).patron ?? before.run?.patron;
+    if (patron) store.set({ patronVoice: { patron, at: now } });
+  }
   if (state.run?.phase === 'reward' && document.pointerLockElement) document.exitPointerLock();
   if (command.type === 'useAbility') selected = null;
   // Keep showing the old health until the hit is actually animated.
@@ -341,6 +348,7 @@ const actions: AppActions = {
     dispatch({ type: 'debugGrant', playerId: PLAYER_ID, abilityId, slot }),
   toggleModifier: (modifierId: string) => dispatch({ type: 'debugModifier', playerId: PLAYER_ID, modifierId }),
   toggleItem: (itemId: string) => dispatch({ type: 'debugItem', playerId: PLAYER_ID, itemId }),
+  toggleGift: (giftId: string) => dispatch({ type: 'debugGift', playerId: PLAYER_ID, giftId }),
   addClass: (id: string) => dispatch({ type: 'debugClass', playerId: PLAYER_ID, classId: id }),
   toggleQuality: () => {
     const quality: Quality = store.get().quality === 'high' ? 'low' : 'high';

@@ -24,7 +24,8 @@ function who(sel: UnitSelector | undefined): string {
   if (sel.kind === 'actor') return t('desc.toActor');
   if (sel.kind === 'frontRow') return t('desc.frontRow');
   if (sel.kind === 'beyond') return t('desc.beyond');
-  if (sel.kind === 'nearest') return t('desc.nearestFoe');
+  if (sel.kind === 'nearest')
+    return (sel.count ?? 1) > 1 ? t('desc.nearestFoes', { n: sel.count ?? 1 }) : t('desc.nearestFoe');
   if (sel.radius >= 50) return t('desc.allFoes');
   if (sel.filter === 'allies') return t('desc.alliesAround');
   if (sel.radius === 1 && !sel.square) return t(sel.filter === 'foes' ? 'desc.adjacentFoes' : 'desc.adjacent');
@@ -37,6 +38,22 @@ const surfaceNames = (ids: readonly string[]) => ids.map((id) => name(getSurface
 function withWho(text: string, sel: UnitSelector | undefined): string {
   const w = who(sel);
   return w ? `${text} ${w}` : text;
+}
+
+/** Durations this long last the whole room, so they are not worth counting. */
+const LASTING = 99;
+
+/** Effects in a row, the same ones merged: "free action ×2". */
+function describeEffects(effects: readonly EffectSpec[]): string {
+  const texts = effects.map(describeEffect);
+  const out: string[] = [];
+  for (let i = 0; i < texts.length; i++) {
+    let n = 1;
+    while (texts[i + n] === texts[i]) n++;
+    out.push(n > 1 ? `${texts[i]} ×${n}` : texts[i]!);
+    i += n - 1;
+  }
+  return out.join(', ');
 }
 
 export function describeEffect(e: EffectSpec): string {
@@ -53,10 +70,19 @@ export function describeEffect(e: EffectSpec): string {
       return `${t('effect.dash', { n: e.distance })}: ${e.onImpact.map(describeEffect).join(', ')}`;
     case 'projectile':
       return `${t('effect.projectile', { n: e.range })}: ${e.onHit.map(describeEffect).join(', ')}`;
-    case 'status':
-      return withWho(t('effect.status', { status: name(getStatus(e.status).nameKey), n: e.turns }), e.to);
+    case 'status': {
+      // A stronger status says how strong; one that lasts the whole room does not count turns.
+      const status =
+        (e.amount ?? 1) > 1 ? `${name(getStatus(e.status).nameKey)} ${e.amount}` : name(getStatus(e.status).nameKey);
+      return withWho(e.turns >= LASTING ? status : t('effect.status', { status, n: e.turns }), e.to);
+    }
     case 'shield':
-      return withWho(t('effect.shield', { n: e.amount, turns: e.turns }), e.to);
+      return withWho(
+        e.turns >= LASTING
+          ? t('effect.shieldLasting', { n: e.amount })
+          : t('effect.shield', { n: e.amount, turns: e.turns }),
+        e.to,
+      );
     case 'surface':
       return e.radius
         ? t('effect.surfaceArea', {
@@ -84,6 +110,8 @@ export function describeEffect(e: EffectSpec): string {
       return t('effect.freeAction');
     case 'kill':
       return t('effect.kill');
+    case 'spreadStatuses':
+      return withWho(t('effect.spreadStatuses'), e.to);
   }
 }
 
@@ -117,8 +145,13 @@ export function abilityName(a: AbilityDef): string {
 }
 
 function describeTrigger(tr: TriggerDef): string {
-  // The most specific phrase there is: by subject (who it happens to), then by actor, then generic.
-  const keys = [`when.${tr.on}.${tr.subject}`, `when.${tr.on}.${tr.actor}`, `when.${tr.on}`];
+  // The most specific phrase there is: by actor and subject, by subject, by actor, then generic.
+  const keys = [
+    `when.${tr.on}.${tr.actor}.${tr.subject}`,
+    `when.${tr.on}.${tr.subject}`,
+    `when.${tr.on}.${tr.actor}`,
+    `when.${tr.on}`,
+  ];
   const key = keys.find(hasText) ?? 'when.generic';
   let when = t(key as TextKey);
   if (tr.tags?.length) when += ` (${tr.tags.map((tag) => t(`tag.${tag}` as TextKey)).join(', ')})`;
@@ -126,8 +159,15 @@ function describeTrigger(tr: TriggerDef): string {
   if (tr.backstab) when += ` ${t('desc.fromBehind')}`;
   if (tr.near !== undefined) when += ` ${t('desc.near', { n: tr.near })}`;
   if (tr.ownerHpAtMost !== undefined) when += ` ${t('desc.lowHp', { n: tr.ownerHpAtMost })}`;
+  if (tr.subjectSurface) when += ` ${t('desc.onSurface', { surface: name(getSurface(tr.subjectSurface).nameKey) })}`;
+  if (tr.ownerStatusAtLeast)
+    when += ` ${t('desc.ownerStatusAtLeast', { status: name(getStatus(tr.ownerStatusAtLeast.status).nameKey), n: tr.ownerStatusAtLeast.amount })}`;
   if (tr.oncePerRoom) when += ` ${t('desc.oncePerRoom')}`;
-  return `${when}: ${tr.effects.map(describeEffect).join(', ')}`;
+  if (tr.oncePerTurn) when += ` ${t('desc.oncePerTurn')}`;
+  const effects = describeEffects(tr.effects);
+  // Lightning or fire damage says so: other rules react to those tags.
+  const kind = tr.effectTags?.length ? ` (${tr.effectTags.map((tag) => t(`tag.${tag}` as TextKey)).join(', ')})` : '';
+  return `${when}: ${effects}${kind}`;
 }
 
 /** Passive, modifier, item or hybrid feature: what it does when gained, its stats and triggers, in words. */
@@ -137,5 +177,6 @@ export function describeRule(r: RuleDef): string {
     ...r.stats.map((s) => t(`stat.${s.stat}` as TextKey, { n: s.add, x: s.add + 1 })),
     ...r.triggers.map(describeTrigger),
   ];
-  return parts.join('. ');
+  // Phrases may already end in a full stop ("for 3 turns."); do not double it.
+  return parts.map((p, i) => (i < parts.length - 1 ? p.replace(/\.$/, '') : p)).join('. ');
 }

@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks';
-import { ABILITIES, ABILITY_SLOTS, CLASSES, ITEMS, MODIFIERS } from '../content';
+import { ABILITIES, ABILITY_SLOTS, CLASSES, GIFTS, ITEMS, MODIFIERS, PATRONS } from '../content';
 import { abilityName, describeAbility, describeRule } from '../ui/describe';
 import { t, type TextKey } from '../i18n';
 import type { DebugAction } from '../sim';
@@ -17,6 +17,7 @@ export interface OverlayActions {
   grantAbility(abilityId: string, slot: number): void;
   toggleModifier(modifierId: string): void;
   toggleItem(itemId: string): void;
+  toggleGift(giftId: string): void;
   addClass(classId: string): void;
   resetSave(): void;
 }
@@ -72,6 +73,9 @@ export function DebugOverlay({ view, actions }: { view: ViewState; actions: Over
         </button>
         <button type="button" onClick={() => actions.cheat('heal')}>
           {t('debug.heal')}
+        </button>
+        <button type="button" onClick={() => actions.cheat('altarNext')} data-testid="altar-next">
+          {t('debug.altarNext')}
         </button>
       </div>
       <div class="debug-buttons">
@@ -173,6 +177,34 @@ export function DebugOverlay({ view, actions }: { view: ViewState; actions: Over
           </label>
         ))}
       </div>
+
+      <div class="debug-section">{t('debug.gifts')}</div>
+      {[
+        ...PATRONS.map((pt) => ({ key: pt.id, label: `${pt.icon} ${t(pt.nameKey as TextKey)}`, ids: pt.gifts })),
+        {
+          key: 'duo',
+          label: t('reward.duo'),
+          ids: GIFTS.filter((g) => g.patrons).map((g) => g.id),
+        },
+      ].map((group) => (
+        <div key={group.key} class="debug-mods">
+          <span class="debug-group">{group.label}</span>
+          {group.ids.map((id) => {
+            const g = GIFTS.find((x) => x.id === id)!;
+            return (
+              <label key={id} title={describeRule(g)}>
+                <input
+                  type="checkbox"
+                  checked={p?.gifts.includes(id) ?? false}
+                  onChange={() => actions.toggleGift(id)}
+                  data-testid={`gift-${id}`}
+                />
+                {t(g.nameKey as TextKey)}
+              </label>
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
 }

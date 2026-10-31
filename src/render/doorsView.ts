@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { dirVec } from '../core/grid';
-import type { RewardKind } from '../content';
+import { getPatron, type RewardKind } from '../content';
 import type { GameState } from '../sim';
 import { CELL } from './dims';
 
@@ -14,6 +14,7 @@ export const REWARD_COLORS: Record<RewardKind, number> = {
   boss: 0xb070ff,
   initiation: 0xffffff,
   treasure: 0xffa020,
+  altar: 0xffffff,
 };
 
 /** How far into the door cell the arch's back (the planks) sits; the portal hangs just in front. */
@@ -32,7 +33,7 @@ export class DoorsView {
   sync(state: GameState): void {
     const run = state.run;
     const offers = run?.phase === 'doors' ? run.doors : [];
-    const key = `${state.seed}:${run?.depth}:${offers.map((o) => `${o.door}${o.reward}`).join(',')}`;
+    const key = `${state.seed}:${run?.depth}:${offers.map((o) => `${o.door}${o.reward}${o.patron ?? ''}`).join(',')}`;
     if (key === this.shownKey) return;
     this.shownKey = key;
     this.clear();
@@ -41,7 +42,7 @@ export class DoorsView {
       if (!door) continue;
       const d = dirVec(door.dir);
       const material = new THREE.MeshBasicMaterial({
-        color: new THREE.Color(REWARD_COLORS[o.reward]).multiplyScalar(1.6),
+        color: new THREE.Color(o.patron ? getPatron(o.patron).color : REWARD_COLORS[o.reward]).multiplyScalar(1.6),
         transparent: true,
         opacity: 0.85,
         blending: THREE.AdditiveBlending,

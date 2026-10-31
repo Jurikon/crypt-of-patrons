@@ -54,6 +54,16 @@ describe('saves', () => {
     expect(migrated.run).toMatchObject({ initiation: false, treasures: 0 });
   });
 
+  it('migrates a version-7 save (before patrons)', () => {
+    const v8 = createGame(5, { classId: 'knight' });
+    const { patron: _p, altars: _a, forceAltar: _f, ...run } = v8.run!;
+    const v7 = { ...v8, version: 7, run, players: v8.players.map(({ gifts: _g, turnUses: _tu, ...p }) => p) };
+    const migrated = migrateState(JSON.parse(JSON.stringify(v7)))!;
+    expect(migrated.version).toBe(8);
+    expect(migrated.players[0]).toMatchObject({ gifts: [], turnUses: [] });
+    expect(migrated.run).toMatchObject({ patron: null, altars: 0, forceAltar: false });
+  });
+
   it('broken, foreign or too-old saves are rejected without throwing', () => {
     expect(readSave(null)).toBeNull();
     expect(readSave('')).toBeNull();

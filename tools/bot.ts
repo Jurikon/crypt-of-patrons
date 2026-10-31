@@ -186,8 +186,11 @@ export function greedyAction(_rng: Rng, state: GameState): Command {
   return face(playerId, p.dir, step) ?? { type: 'move', playerId, dir: 'forward' };
 }
 
-/** Between fights: take the first reward (replacing the last slot when full), then walk to the first door. */
-function runAction(rng: Rng, state: GameState, strategy: Strategy): Command | null {
+/**
+ * Between fights: take the first reward (replacing the last slot when full), then walk to the first door
+ * (an altar door first, when `altars` is on, to see what gifts do to a run).
+ */
+function runAction(rng: Rng, state: GameState, strategy: Strategy, altars = false): Command | null {
   const run = state.run;
   const p = state.players[0]!;
   if (!run) return null;
@@ -200,7 +203,7 @@ function runAction(rng: Rng, state: GameState, strategy: Strategy): Command | nu
       : { type: 'chooseReward', playerId: p.id, index };
   }
   if (run.phase !== 'doors') return null;
-  const offer = run.doors[0];
+  const offer = (altars ? run.doors.find((d) => d.reward === 'altar') : undefined) ?? run.doors[0];
   const door = offer ? state.room.doors[offer.door] : undefined;
   if (!door) return null;
   const inside = { x: door.x + DIRS[door.dir]!.x, y: door.y + DIRS[door.dir]!.y };
@@ -223,12 +226,13 @@ export interface RunResult {
     hybrid: string | null;
     modifiers: string[];
     items: string[];
+    gifts: string[];
     abilities: string[];
   };
 }
 
 /** Plays a whole act: fights with `strategy`, takes rewards, walks through doors. */
-export function playRun(seed: number, classId: string, strategy: Strategy = 'greedy'): RunResult {
+export function playRun(seed: number, classId: string, strategy: Strategy = 'greedy', altars = false): RunResult {
   const rng = createRng(`run/${seed}/${classId}`);
   let state = createGame(seed, { classId });
   // An impatient player: after 15 turns without anyone getting hurt, just go for the enemies.
@@ -240,7 +244,7 @@ export function playRun(seed: number, classId: string, strategy: Strategy = 'gre
     const hp = state.enemies.reduce((a, e) => a + e.hp, 0) + state.players[0]!.hp;
     calm = hp === lastHp ? calm + 1 : 0;
     lastHp = hp;
-    const between = runAction(rng, state, strategy);
+    const between = runAction(rng, state, strategy, altars);
     const act =
       strategy === 'careful' && calm < 15 ? carefulAction : strategy === 'random' ? randomAction : greedyAction;
     const cmd = between ?? act(rng, state);
@@ -254,7 +258,14 @@ export function playRun(seed: number, classId: string, strategy: Strategy = 'gre
     result,
     depth: run.depth,
     turns: run.turns + state.combat.turn,
-    build: { classes: p.classes, hybrid: p.hybrid, modifiers: p.modifiers, items: p.items, abilities: p.abilities },
+    build: {
+      classes: p.classes,
+      hybrid: p.hybrid,
+      modifiers: p.modifiers,
+      items: p.items,
+      gifts: p.gifts,
+      abilities: p.abilities,
+    },
   };
 }
 
@@ -300,17 +311,34 @@ export function playFights(
 if (import.meta.url === `file://${process.argv[1]}`) {
   const count = Number(process.argv[2] ?? 200);
   const first = Number(process.argv[3] ?? 1);
-  for (const cls of CLASSES) {
-    const runs = Array.from({ length: Math.min(count, 100) }, (_, i) => playRun(first + i, cls.id, 'careful'));
-    const won = runs.filter((r) => r.result === 'won').length;
-    const stuck = runs.filter((r) => r.result === 'stuck').length;
-    const depth = runs.reduce((a, r) => a + r.depth, 0) / runs.length;
-    const turns = runs.map((r) => r.turns).sort((a, b) => a - b);
-    console.log(
-      `run (careful) ${cls.id.padEnd(12)}: won ${won}/${runs.length}  stuck ${stuck}  avg room ${depth.toFixed(1)}  ` +
-        `turns median ${turns[Math.floor(turns.length / 2)]}`,
-    );
-  }
+  const giftWins = new Map<string, { won: number; runs: number }>();
+  for (const altars of [false, true])
+    for (const cls of CLASSES) {
+      const runs = Array.from({ length: Math.min(count, 100) }, (_, i) =>
+        playRun(first + i, cls.id, 'careful', altars),
+      );
+      const won = runs.filter((r) => r.result === 'won').length;
+      const stuck = runs.filter((r) => r.result === 'stuck').length;
+      const depth = runs.reduce((a, r) => a + r.depth, 0) / runs.length;
+      const turns = runs.map((r) => r.turns).sort((a, b) => a - b);
+      const gifts = runs.reduce((a, r) => a + r.build.gifts.length, 0) / runs.length;
+      console.log(
+        `run (careful${altars ? ', altars' : ''}) ${cls.id.padEnd(12)}: won ${won}/${runs.length}  stuck ${stuck}  ` +
+          `avg room ${depth.toFixed(1)}  gifts ${gifts.toFixed(1)}  turns median ${turns[Math.floor(turns.length / 2)]}`,
+      );
+      if (altars)
+        for (const r of runs)
+          for (const g of r.build.gifts) {
+            const s = giftWins.get(g) ?? { won: 0, runs: 0 };
+            s.runs++;
+            if (r.result === 'won') s.won++;
+            giftWins.set(g, s);
+          }
+    }
+  console.log('gifts in runs (won/taken):');
+  for (const [g, s] of [...giftWins].sort((a, b) => b[1].won / b[1].runs - a[1].won / a[1].runs))
+    console.log(`  ${g.padEnd(28)} ${s.won}/${s.runs}`);
+  if (process.argv[4] === 'runs') process.exit(0);
   for (const loadout of ['class', 'full'] as const)
     for (const cls of CLASSES)
       for (const strategy of ['random', 'greedy'] as const) {

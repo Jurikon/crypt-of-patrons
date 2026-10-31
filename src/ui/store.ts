@@ -35,6 +35,8 @@ export interface ViewState {
   readonly roomAt: number;
   /** A hybrid just formed: its name and when, for the announcement. */
   readonly hybridNews: { readonly name: string; readonly at: number } | null;
+  /** A gift was just taken: its patron speaks a line. */
+  readonly patronVoice: { readonly patron: string; readonly at: number } | null;
 }
 
 export interface Store<T> {

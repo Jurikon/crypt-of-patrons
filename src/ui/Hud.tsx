@@ -1,7 +1,20 @@
-import { ACT, getAbility, getClass, getHybrid, getItem, getModifier, getPassive, getStatus } from '../content';
+import {
+  ACT,
+  getAbility,
+  getClass,
+  getGift,
+  getHybrid,
+  getItem,
+  getModifier,
+  getPassive,
+  getPatron,
+  getStatus,
+  PATRONS,
+} from '../content';
 import { t, type TextKey } from '../i18n';
 import { cooldownOf, intentCells, type GameState } from '../sim';
 import { abilityName, describeAbility, describeRule } from './describe';
+import { cssColor, giftPatrons } from './RewardScreen';
 import type { ViewState } from './store';
 
 export interface HudActions {
@@ -44,7 +57,9 @@ export function Hud({ view, actions, now }: { view: ViewState; actions: HudActio
         <span class="turn-number">{t('hud.turn', { n: game.combat.turn })}</span>
       </div>
 
-      {!view.topView && (p.modifiers.length > 0 || p.items.length > 0 || p.hybrid) && <BuildPanel player={p} />}
+      {!view.topView && (p.modifiers.length > 0 || p.items.length > 0 || p.gifts.length > 0 || p.hybrid) && (
+        <BuildPanel player={p} />
+      )}
 
       {notice && (
         <div class="notice" data-testid="notice">
@@ -183,6 +198,28 @@ function BuildPanel({ player: p }: { player: GameState['players'][number] }) {
           </div>
         );
       })}
+      {PATRONS.filter((pt) => p.gifts.some((g) => giftPatrons(g)[0] === pt.id)).map((pt) => (
+        <div key={pt.id} class="mod-patron" style={{ '--patron': cssColor(pt.color) }} data-testid={`build-${pt.id}`}>
+          <div class="mod-patron-name">
+            {pt.icon} {t(pt.nameKey as TextKey)}
+          </div>
+          {p.gifts
+            .filter((g) => giftPatrons(g)[0] === pt.id)
+            .map((id) => {
+              const g = getGift(id);
+              return (
+                <div key={id} class={g.patrons ? 'mod mod-gift mod-duo' : 'mod mod-gift'} title={describeRule(g)}>
+                  {g.patrons
+                    ? `${giftPatrons(id)
+                        .map((x) => getPatron(x).icon)
+                        .join('')} `
+                    : ''}
+                  {t(g.nameKey as TextKey)}
+                </div>
+              );
+            })}
+        </div>
+      ))}
       {p.items.map((id) => {
         const it = getItem(id);
         return (

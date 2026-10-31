@@ -1,7 +1,7 @@
-import type { RewardKind } from '../content';
+import { getPatron, type RewardKind } from '../content';
 import { t, type TextKey } from '../i18n';
 import type { Intent } from '../sim';
-import type { LabelUnit } from '../render/renderer';
+import type { DoorLabel, LabelUnit } from '../render/renderer';
 import { useStore, type LabelsStore } from './store';
 
 const EDGE = 44;
@@ -15,6 +15,7 @@ const DOOR_ICONS: Record<RewardKind, string> = {
   boss: '♛',
   initiation: '✶',
   treasure: '◆',
+  altar: '✟',
 };
 
 function intentIcon(intent: Intent): string {
@@ -44,19 +45,7 @@ export function WorldOverlay({ store }: { store: LabelsStore }) {
         labels.units.map((u) =>
           u.head.onScreen || u.ally ? null : <EdgeArrow key={u.id} u={u} w={width} h={height} />,
         )}
-      {labels.doors.map((d, i) =>
-        d.at.onScreen ? (
-          <div
-            key={`door${i}`}
-            class={`door-tag door-${d.reward}`}
-            style={{ left: `${d.at.x}px`, top: `${d.at.y}px` }}
-            data-testid="door-tag"
-          >
-            <span class="door-icon">{DOOR_ICONS[d.reward]}</span>
-            {t(`door.${d.reward}` as TextKey)}
-          </div>
-        ) : null,
-      )}
+      {labels.doors.map((d, i) => (d.at.onScreen ? <DoorTag key={`door${i}`} d={d} /> : null))}
       {labels.cells.map((c, i) =>
         c.at.onScreen ? (
           <div key={i} class={`cell-label cell-${c.kind}`} style={{ left: `${c.at.x}px`, top: `${c.at.y}px` }}>
@@ -125,6 +114,25 @@ function EdgeArrow({ u, w, h }: { u: LabelUnit; w: number; h: number }) {
           {u.intent.damage}
         </div>
       )}
+    </div>
+  );
+}
+
+/** An altar door shows its patron's sign, name and colour: "Altar of Morra". */
+function DoorTag({ d }: { d: DoorLabel }) {
+  const patron = d.patron ? getPatron(d.patron) : null;
+  return (
+    <div
+      class={`door-tag door-${d.reward}`}
+      style={{
+        left: `${d.at.x}px`,
+        top: `${d.at.y}px`,
+        ...(patron ? { '--patron': `#${patron.color.toString(16).padStart(6, '0')}` } : {}),
+      }}
+      data-testid="door-tag"
+    >
+      <span class="door-icon">{patron ? patron.icon : DOOR_ICONS[d.reward]}</span>
+      {patron ? t('door.altar', { patron: t(`${patron.nameKey}.gen` as TextKey) }) : t(`door.${d.reward}` as TextKey)}
     </div>
   );
 }

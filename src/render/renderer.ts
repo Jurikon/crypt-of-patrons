@@ -14,6 +14,7 @@ import { CELL, WALL_H } from './dims';
 import { Particles } from './fx';
 import { Highlights, type Highlight } from './highlights';
 import { SurfacesView } from './surfacesView';
+import { AltarView } from './altarView';
 import { DoorsView } from './doorsView';
 import type { RewardKind } from '../content';
 import { UnitsView, type UnitVisual } from './unitsView';
@@ -105,6 +106,8 @@ export interface CellLabel {
 export interface DoorLabel {
   readonly at: ScreenPoint;
   readonly reward: RewardKind;
+  /** An altar's patron. */
+  readonly patron?: string | undefined;
 }
 
 /** Everything the HTML overlay needs to draw this frame. */
@@ -168,6 +171,7 @@ export class GameRenderer {
   private preview: { preview: Preview; target: Vec2; options: readonly Vec2[] } | null = null;
   private readonly surfacesView = new SurfacesView();
   private readonly doorsView = new DoorsView();
+  private readonly altarView = new AltarView();
   private blasts: { cells: readonly Vec2[]; start: number }[] = [];
   private strikes: { cells: readonly Vec2[]; start: number }[] = [];
   private floaters: FloatingNumber[] = [];
@@ -199,6 +203,7 @@ export class GameRenderer {
       this.unitsView.group,
       this.surfacesView.group,
       this.doorsView.group,
+      this.altarView.group,
       this.highlights.group,
       this.fx.group,
     );
@@ -296,6 +301,7 @@ export class GameRenderer {
     this.unitsView.sync(state);
     this.surfacesView.sync(state);
     this.doorsView.sync(state);
+    this.altarView.sync(state);
     if (this.rig) this.rig.snap(state.room, player, now);
     else this.rig = new CameraRig(this.camera, state.room, player, now);
     this.rig.setRoom(state.room, this.topMargins());
@@ -403,6 +409,7 @@ export class GameRenderer {
           this.unitsView.sync(this.target_);
           this.surfacesView.sync(this.target_);
           this.doorsView.sync(this.target_);
+          this.altarView.sync(this.target_);
         }
         return;
       }
@@ -539,7 +546,11 @@ export class GameRenderer {
         return 0;
       case 'doorsOpened':
       case 'rewardTaken':
-        if (this.target_) this.doorsView.sync(this.target_);
+      case 'rewardOffered':
+        if (this.target_) {
+          this.doorsView.sync(this.target_);
+          this.altarView.sync(this.target_);
+        }
         return 0;
       case 'surfaceAdded':
         this.surfacesView.add(e.surface, e.at);
@@ -671,6 +682,7 @@ export class GameRenderer {
     this.room.lavaMaterial.uniforms.uTime!.value = s;
     this.fx.update(now);
     this.doorsView.update(now);
+    this.altarView.update(now);
     this.surfacesView.update(now);
 
     // Top view: clear the fog, lift the ambient light, drop the ceiling, show the player marker.
@@ -772,7 +784,7 @@ export class GameRenderer {
     if (run?.phase === 'doors' && this.target_)
       for (const o of run.doors) {
         const d = this.target_.room.doors[o.door];
-        if (d) doors.push({ at: this.project(cellCenter(d).setY(2.15)), reward: o.reward });
+        if (d) doors.push({ at: this.project(cellCenter(d).setY(2.15)), reward: o.reward, patron: o.patron });
       }
     return {
       width: this.cssW,
@@ -805,6 +817,7 @@ export class GameRenderer {
     this.room?.dispose();
     this.surfacesView.dispose();
     this.doorsView.dispose();
+    this.altarView.dispose();
     this.highlights.dispose();
     this.unitsView.clear();
     this.fx.dispose();
