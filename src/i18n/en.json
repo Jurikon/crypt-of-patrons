@@ -74,7 +74,7 @@
   "desc.adjacentFoes": "to adjacent enemies",
   "desc.inRadius": "within {n} cells",
   "desc.foesInRadius": "to enemies within {n} cells",
-  "desc.withStatus": "with {status}",
+  "desc.withStatus": ", if the target has {status}",
   "target.line": "In a straight line, range {n}",
   "target.unit.foes": "An enemy within {n} cells",
   "target.unit.ownSummons": "Your summon within {n} cells",

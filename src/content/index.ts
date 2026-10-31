@@ -1210,6 +1210,7 @@ export const GIFTS: readonly RuleDef[] = [
   {
     id: 'duo.plagueDead',
     nameKey: 'duo.plagueDead',
+    requires: ['summon'],
     patrons: ['morra', 'silas'],
     stats: [],
     triggers: [
@@ -1243,6 +1244,7 @@ export const GIFTS: readonly RuleDef[] = [
   {
     id: 'duo.iceStorm',
     nameKey: 'duo.iceStorm',
+    requires: ['push'],
     patrons: ['ingrid', 'velkar'],
     stats: [],
     triggers: [
@@ -1263,6 +1265,7 @@ export const GIFTS: readonly RuleDef[] = [
   {
     id: 'duo.plagueFlame',
     nameKey: 'duo.plagueFlame',
+    requiresStatus: 'burning',
     patrons: ['ashtar', 'morra'],
     stats: [],
     triggers: [
@@ -1277,6 +1280,7 @@ export const GIFTS: readonly RuleDef[] = [
   {
     id: 'duo.iceGuardians',
     nameKey: 'duo.iceGuardians',
+    requires: ['summon'],
     patrons: ['silas', 'ingrid'],
     stats: [],
     triggers: [

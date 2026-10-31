@@ -86,23 +86,23 @@ function fits(p: Player, rule: RuleDef): boolean {
 }
 
 /**
- * Gifts an altar of `patron` offers: three of theirs not taken yet (ones that fit the build first, then
- * any), and, once the hero holds gifts of two patrons, sometimes their duo gift as the third card.
+ * Gifts an altar of `patron` offers: up to three of theirs not taken yet that fit the build, and, once the
+ * hero holds gifts of two patrons, sometimes their duo gift (if it fits too) as the third card.
  */
 function altarOffer(rng: Rng, p: Player, patron: string): RewardOption[] {
   const own = GIFTS.filter((g) => g.patron === patron && !p.gifts.includes(g.id));
-  const fitting = shuffle(
-    rng,
-    own.filter((g) => fits(p, g)),
-  );
-  const rest = shuffle(
-    rng,
-    own.filter((g) => !fits(p, g)),
-  );
-  const picks = [...fitting, ...rest].slice(0, ACT.offer).map((g) => ({ kind: 'gift' as const, id: g.id }));
+  // Only gifts with something to work on, even if that leaves fewer than three cards. A build that
+  // fits none of them (doors avoid such patrons, so this is a fallback) still gets something.
+  const fitting = own.filter((g) => fits(p, g));
+  const pool = shuffle(rng, fitting.length ? fitting : own);
+  const picks = pool.slice(0, ACT.offer).map((g) => ({ kind: 'gift' as const, id: g.id }));
   const patronsHeld = new Set(p.gifts.map((id) => getGift(id).patron).filter((x): x is string => !!x));
   const duo = GIFTS.find(
-    (g) => g.patrons?.includes(patron) && g.patrons.every((x) => patronsHeld.has(x)) && !p.gifts.includes(g.id),
+    (g) =>
+      g.patrons?.includes(patron) &&
+      g.patrons.every((x) => patronsHeld.has(x)) &&
+      !p.gifts.includes(g.id) &&
+      fits(p, g),
   );
   if (duo && float(rng) < ACT.duoChance) {
     if (picks.length >= ACT.offer) picks[ACT.offer - 1] = { kind: 'gift', id: duo.id };

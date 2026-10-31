@@ -407,15 +407,41 @@ describe('altars', () => {
     expect(duoSeen).toBe(true);
   });
 
-  it('gifts that fit come first (a Knight is not offered summon gifts while others are left)', () => {
+  it('a duo gift with nothing to work on is not offered (Guardians of ice without summons)', () => {
+    for (let seed = 1; seed <= 30; seed++) {
+      const s = createGame(seed, { classId: 'knight' });
+      s.players[0]!.gifts.push('gift.silas.graveHarvest', 'gift.ingrid.hoarfrost');
+      enterRoom(s, 3, 'combat', 'altar', []);
+      s.run!.patron = 'ingrid';
+      const offer = apply(s, { type: 'debug', playerId: 'p1', action: 'killAll' }).state.run!.offer;
+      expect(
+        offer.some((o) => o.kind === 'gift' && o.id === 'duo.iceGuardians'),
+        `seed ${seed}`,
+      ).toBe(false);
+    }
+  });
+
+  it('an altar never offers a gift with nothing to work on (a Knight gets no summon gifts from Silas)', () => {
     for (let seed = 1; seed <= 20; seed++) {
       const s = createGame(seed, { classId: 'knight' });
       enterRoom(s, 2, 'combat', 'altar', []);
       s.run!.patron = 'silas';
       const offer = apply(s, { type: 'debug', playerId: 'p1', action: 'killAll' }).state.run!.offer;
+      const ids = offer.map((o) => (o.kind === 'gift' ? o.id : '')).sort();
+      // Only retinue and grave harvest fit: two cards, not a third that does nothing.
+      expect(ids).toEqual(['gift.silas.graveHarvest', 'gift.silas.retinue']);
+    }
+  });
+
+  it('owner bug: a Necromancer without pushes is not offered Ice verdict at an altar of Ingrid', () => {
+    for (let seed = 1; seed <= 50; seed++) {
+      const s = createGame(seed, { classId: 'necromancer' });
+      enterRoom(s, 2, 'combat', 'altar', []);
+      s.run!.patron = 'ingrid';
+      const offer = apply(s, { type: 'debug', playerId: 'p1', action: 'killAll' }).state.run!.offer;
       const ids = offer.map((o) => (o.kind === 'gift' ? o.id : ''));
-      // Retinue and grave harvest always fit; the third card is a filler.
-      expect(ids.slice(0, 2).sort()).toEqual(['gift.silas.graveHarvest', 'gift.silas.retinue']);
+      expect(ids, `seed ${seed}`).not.toContain('gift.ingrid.iceVerdict');
+      expect(ids, `seed ${seed}`).not.toContain('gift.ingrid.coldTrail');
     }
   });
 });

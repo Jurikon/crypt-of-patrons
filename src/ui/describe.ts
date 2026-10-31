@@ -155,7 +155,8 @@ function describeTrigger(tr: TriggerDef): string {
   const key = keys.find(hasText) ?? 'when.generic';
   let when = t(key as TextKey);
   if (tr.tags?.length) when += ` (${tr.tags.map((tag) => t(`tag.${tag}` as TextKey)).join(', ')})`;
-  if (tr.subjectStatus) when += ` ${t('desc.withStatus', { status: name(getStatus(tr.subjectStatus).nameKey) })}`;
+  // A clause of its own (", if it has Stun"), so it cannot be read as part of the phrase before it.
+  if (tr.subjectStatus) when += t('desc.withStatus', { status: name(getStatus(tr.subjectStatus).nameKey) });
   if (tr.backstab) when += ` ${t('desc.fromBehind')}`;
   if (tr.near !== undefined) when += ` ${t('desc.near', { n: tr.near })}`;
   if (tr.ownerHpAtMost !== undefined) when += ` ${t('desc.lowHp', { n: tr.ownerHpAtMost })}`;
