@@ -209,6 +209,16 @@ kbd {
   color: var(--accent);
 }
 
+.danger-hint {
+  padding: 6px 14px;
+  font-size: 13px;
+  color: #ffd040;
+  background: rgba(90, 14, 6, 0.9);
+  border: 2px solid #c8402a;
+  animation: pulse 0.6s ease-in-out infinite alternate;
+  text-align: center;
+}
+
 .bottom-stack {
   position: absolute;
   left: 50%;

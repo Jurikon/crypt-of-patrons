@@ -11,12 +11,6 @@ import { createStore, type LabelsStore, type ViewState } from './ui/store';
 
 const PLAYER_ID = 'p1';
 
-/**
- * Undo policy (ROADMAP M1, decision 3): steps can be undone freely until the first attack of the turn.
- * Kept as a setting to revisit after playtests.
- */
-const UNDO_POLICY: 'movesUntilAttack' | 'off' = 'movesUntilAttack';
-
 const lang = detectLang(navigator.languages ?? [navigator.language]);
 setLang(lang);
 document.documentElement.lang = lang;
@@ -33,8 +27,6 @@ let state: GameState = createGame(seed);
 /** Every command since the room was created: seed + this list reproduces the session exactly. */
 let commands: Command[] = [];
 let buffered: Command | null = null;
-/** Snapshots before each step of the current player turn, for undo. */
-let undoStack: { state: GameState; commandCount: number }[] = [];
 let selected: string | null = null;
 
 let renderer: GameRenderer;
@@ -57,7 +49,6 @@ const store = createStore<ViewState>({
   selected: null,
   preview: null,
   busy: false,
-  canUndo: false,
   notice: null,
   hitAt: -1e9,
   shownHp: null,
@@ -87,18 +78,14 @@ function run(command: Command, now: number): void {
     store.set({ notice: { reason: rejected.reason, at: now } });
     return;
   }
-  if (UNDO_POLICY !== 'off' && command.type === 'move' && result.events[0]?.type === 'moved') {
-    undoStack.push({ state: before, commandCount: commands.length });
-  }
-  if (command.type === 'useAbility' || command.type === 'endTurn' || command.type === 'debug') undoStack = [];
   state = result.state;
   commands.push(command);
   renderer.play(result.events, state);
-  if (command.type === 'useAbility' || command.type === 'endTurn') selected = null;
+  if (command.type === 'useAbility') selected = null;
   // Keep showing the old health until the hit is actually animated.
-  if (command.type === 'endTurn') store.set({ shownHp: before.players[0]?.hp ?? null });
+  if (result.events.some((e) => e.type === 'phaseChanged')) store.set({ shownHp: before.players[0]?.hp ?? null });
   if (state.combat.status !== 'active' && document.pointerLockElement) document.exitPointerLock();
-  store.set({ game: state, canUndo: undoStack.length > 0 && !player()?.attackedThisTurn });
+  store.set({ game: state });
   refreshPreview();
 }
 
@@ -109,28 +96,14 @@ function dispatch(command: Command): void {
   else run(command, now);
 }
 
-function undo(): void {
-  const now = performance.now();
-  if (renderer.isBusy(now) || player()?.attackedThisTurn) return;
-  const snap = undoStack.pop();
-  if (!snap) return;
-  state = snap.state;
-  commands = commands.slice(0, snap.commandCount);
-  buffered = null;
-  renderer.reset(state, now);
-  store.set({ game: state, canUndo: undoStack.length > 0 });
-  refreshPreview();
-}
-
 function loadSeed(next: number): void {
   seed = next;
   state = createGame(seed);
   commands = [];
   buffered = null;
-  undoStack = [];
   selected = null;
   renderer.reset(state, performance.now());
-  store.set({ game: state, canUndo: false, notice: null });
+  store.set({ game: state, notice: null });
   refreshPreview();
 }
 
@@ -151,9 +124,11 @@ function selectAbility(slot: number): void {
   refreshPreview();
 }
 
+/** LMB / F: the selected ability, or the base attack when nothing is selected. */
 function confirm(): void {
-  if (!selected) return;
-  dispatch({ type: 'useAbility', playerId: PLAYER_ID, abilityId: selected });
+  const abilityId = selected ?? player()?.abilities[0];
+  if (!abilityId || state.combat.status !== 'active') return;
+  dispatch({ type: 'useAbility', playerId: PLAYER_ID, abilityId });
 }
 
 function cancel(): void {
@@ -166,8 +141,6 @@ const actions: AppActions = {
   exportState: () => JSON.stringify({ seed, commands }),
   cheat: (action: DebugAction) => dispatch({ type: 'debug', playerId: PLAYER_ID, action }),
   selectAbility,
-  endTurn: () => dispatch({ type: 'endTurn', playerId: PLAYER_ID }),
-  undo,
   retry: () => loadSeed(seed),
   newRoom: newSeed,
 };
@@ -179,7 +152,6 @@ attachInput(
     selectAbility,
     confirm,
     cancel,
-    undo,
     topView: (held) => {
       renderer.setTopView(held, performance.now());
       store.set({ topView: held });

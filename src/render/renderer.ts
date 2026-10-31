@@ -55,22 +55,21 @@ const POST_FRAGMENT = /* glsl */ `
   }
 `;
 
-/** How long each event takes to play, in ms. 0 = instant. Enemy actions play one after another. */
+/**
+ * How long each event blocks the queue, in ms. Movement does not block: the player's step and every
+ * enemy's step animate at the same time, so a turn reads as one quick beat. Hits play one by one.
+ */
 const EVENT_MS: Partial<Record<GameEvent['type'], number>> = {
-  moved: 120,
-  turned: 0,
-  bumped: 0,
-  abilityUsed: 150,
-  enemyAttack: 320,
-  damaged: 240,
-  pushed: 110,
-  collided: 140,
-  fell: 420,
-  died: 300,
-  phaseChanged: 0,
+  abilityUsed: 110,
+  enemyAttack: 200,
+  damaged: 130,
+  pushed: 90,
+  collided: 110,
+  fell: 380,
+  died: 260,
 };
-const PLAYER_STEP_MS = 150;
-const ENEMY_PHASE_PAUSE_MS = 350;
+const MOVE_MS = 140;
+const ENEMY_PHASE_PAUSE_MS = 0;
 const FLOATER_MS = 900;
 const STRIKE_MS = 350;
 
@@ -267,7 +266,12 @@ export class GameRenderer {
 
   /** True while anything is still animating; new commands wait until it is done. */
   isBusy(now: number): boolean {
-    return this.playing !== null || this.queue.length > 0 || (this.rig?.isBusy(now) ?? false);
+    return (
+      this.playing !== null ||
+      this.queue.length > 0 ||
+      (this.rig?.isBusy(now) ?? false) ||
+      this.unitsView.isAnimating(now)
+    );
   }
 
   resize(): void {
@@ -293,8 +297,6 @@ export class GameRenderer {
     while (true) {
       if (this.playing && now - this.playing.start < this.playing.dur) return;
       this.playing = null;
-      // Player motion is animated by the camera rig; wait for it before the next event.
-      if (rig.isBusy(now) && this.queue.length > 0) return;
       const event = this.queue.shift();
       if (!event) {
         // Done: snap once to the authoritative state in case any animation drifted.
@@ -317,12 +319,9 @@ export class GameRenderer {
     const isPlayer = 'unitId' in e && this.playerIds.has(e.unitId);
     switch (e.type) {
       case 'moved':
-        if (isPlayer) {
-          rig.onEvent(e, now);
-          return PLAYER_STEP_MS;
-        }
-        v.moveTo(e.unitId, e.to, now, EVENT_MS.moved ?? 0);
-        return EVENT_MS.moved ?? 0;
+        if (isPlayer) rig.onEvent(e, now);
+        else v.moveTo(e.unitId, e.to, now, MOVE_MS);
+        return 0;
       case 'turned':
         if (isPlayer) rig.onEvent(e, now);
         else {

@@ -6,9 +6,9 @@ export interface InputHandlers {
   command(c: Command): void;
   /** Ability slot (0-based) pressed: select it, or use it if already selected. */
   selectAbility(slot: number): void;
+  /** Use the selected ability, or the base attack if none is selected. */
   confirm(): void;
   cancel(): void;
-  undo(): void;
   topView(held: boolean): void;
   toggleDebug(): void;
   newSeed(): void;
@@ -36,20 +36,15 @@ export function attachInput(canvas: HTMLElement, handlers: InputHandlers, opts: 
     e.preventDefault();
     const command = actionToCommand(action, opts.playerId);
     // Holding a movement key repeats it; the caller buffers one command while an animation plays.
-    if (command && (command.type === 'move' || command.type === 'turn')) {
-      handlers.command(command);
-      return;
-    }
-    if (e.repeat) return;
     if (command) {
       handlers.command(command);
       return;
     }
+    if (e.repeat) return;
     const slot = ABILITY_ACTIONS.indexOf(action);
     if (slot >= 0) handlers.selectAbility(slot);
     else if (action === 'confirm') handlers.confirm();
     else if (action === 'cancel') handlers.cancel();
-    else if (action === 'undo') handlers.undo();
     else if (action === 'topView') handlers.topView(true);
     else if (action === 'toggleDebug') handlers.toggleDebug();
     else if (action === 'newSeed') handlers.newSeed();

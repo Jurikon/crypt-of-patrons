@@ -14,7 +14,6 @@ export interface ViewState {
   readonly preview: Preview | null;
   /** True while events are still animating (enemy phase, pushes…). */
   readonly busy: boolean;
-  readonly canUndo: boolean;
   /** Last rejected command, shown briefly. */
   readonly notice: { readonly reason: RejectReason; readonly at: number } | null;
   /** Time of the last hit on the player, for the red screen flash. */

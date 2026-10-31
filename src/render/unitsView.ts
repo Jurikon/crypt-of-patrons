@@ -147,6 +147,16 @@ export class UnitsView {
     v.dying = { start: now, dur, fall };
   }
 
+  /** True while any unit is still moving, lunging or dying. */
+  isAnimating(now: number): boolean {
+    for (const v of this.units.values()) {
+      if (v.tween && now - v.tween.start < v.tween.dur) return true;
+      if (v.lunge && now - v.lunge.start < v.lunge.dur) return true;
+      if (v.dying && now - v.dying.start < v.dying.dur) return true;
+    }
+    return false;
+  }
+
   update(now: number): void {
     for (const v of this.units.values()) {
       if (v.tween) {
