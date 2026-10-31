@@ -36,7 +36,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/sim/**/*.ts', 'src/core/**/*.ts'],
+    files: ['src/sim/**/*.ts', 'src/core/**/*.ts', 'src/content/**/*.ts'],
     languageOptions: {
       // Only plain ECMAScript globals: no window, document, localStorage, performance...
       globals: { ...globals.es2022 },

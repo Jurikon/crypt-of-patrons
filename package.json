@@ -13,7 +13,8 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "test:smoke": "playwright test",
-    "rooms": "tsx tools/print-rooms.ts"
+    "rooms": "tsx tools/print-rooms.ts",
+    "bot": "tsx tools/bot.ts"
   },
   "dependencies": {
     "preact": "^11.1.1",
