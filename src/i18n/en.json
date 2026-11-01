@@ -419,5 +419,8 @@
   "door.altar.hint": "A patron's gift: a powerful rule of their style",
   "reward.hint.item": "Changes the rules of play; cursed ones trade a big upside for a real downside",
   "when.linger": "Whoever of the other side steps in or ends a turn here",
-  "debug.hint": "F1 to open or close"
+  "debug.hint": "F1 to open or close",
+  "flag.markerFor": "Does nothing by itself. Rules that react to it:",
+  "reward.kind.passive": "Class feature",
+  "reward.kind.hybrid": "Hybrid"
 }

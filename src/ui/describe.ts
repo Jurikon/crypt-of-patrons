@@ -1,4 +1,9 @@
 import {
+  GIFTS,
+  HYBRIDS,
+  ITEMS,
+  MODIFIERS,
+  PASSIVES,
   getStatus,
   getSummon,
   getSurface,
@@ -195,6 +200,26 @@ export function describeRule(r: RuleDef): string {
   return parts.map((p, i) => (i < parts.length - 1 ? p.replace(/\.$/, '') : p)).join('. ');
 }
 
+/** Every rule that can be gained, with what kind of reward it is (for "who reacts to this?"). */
+const REACTORS: readonly { rule: RuleDef; kind: TextKey }[] = [
+  ...MODIFIERS.map((rule) => ({ rule, kind: 'reward.kind.modifier' as TextKey })),
+  ...ITEMS.map((rule) => ({ rule, kind: 'reward.kind.item' as TextKey })),
+  ...GIFTS.map((rule) => ({ rule, kind: 'reward.kind.gift' as TextKey })),
+  ...PASSIVES.map((rule) => ({ rule, kind: 'reward.kind.passive' as TextKey })),
+  ...HYBRIDS.map((h) => ({ rule: h.rule, kind: 'reward.kind.hybrid' as TextKey })),
+];
+
+/**
+ * A status with no effect of its own (a mark) is only worth something through the rules that react to
+ * it: name them, so the player knows what to look for.
+ */
+function markerText(status: string): string {
+  const names = REACTORS.filter(({ rule }) => rule.triggers.some((tr) => tr.subjectStatus === status)).map(
+    ({ rule, kind }) => `«${name(rule.nameKey)}» (${t(kind).toLocaleLowerCase()}): ${describeRule(rule)}`,
+  );
+  return names.length ? `${t('flag.markerFor')} ${names.join('; ')}` : t('flag.marker');
+}
+
 /** What a status does, from its data: its stats, its triggers and its special flags. */
 export function describeStatus(st: StatusDef): string {
   const flags = (['stun', 'rooted', 'blind', 'taunt', 'shield', 'frontGuard', 'stacks', 'jumps'] as const)
@@ -206,7 +231,7 @@ export function describeStatus(st: StatusDef): string {
     ...st.triggers.map(describeTrigger),
     ...(st.onExpire ? [`${t('desc.onExpire')}: ${describeEffects(st.onExpire)}`] : []),
   ];
-  return capital(parts.length ? sentences(parts) : t('flag.marker'));
+  return capital(parts.length ? sentences(parts) : markerText(st.id));
 }
 
 /** Phrases joined into sentences, without doubling a full stop that ends one ("3 turns."). */
