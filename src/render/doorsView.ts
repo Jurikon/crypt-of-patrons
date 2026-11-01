@@ -3,8 +3,9 @@ import { dirVec } from '../core/grid';
 import { getPatron, type RewardKind } from '../content';
 import type { GameState } from '../sim';
 import { CELL } from './dims';
+import { planks, solid } from './look/textures';
 
-/** Portal colour per reward, so a door reads at a glance (labels add the words). */
+/** Light colour per reward, so a door reads at a glance (labels add the words). */
 export const REWARD_COLORS: Record<RewardKind, number> = {
   ability: 0xffd060,
   modifier: 0x80d0ff,
@@ -17,66 +18,271 @@ export const REWARD_COLORS: Record<RewardKind, number> = {
   altar: 0xffffff,
 };
 
-/** How far into the door cell the arch's back (the planks) sits; the portal hangs just in front. */
-const RECESS = 0.76;
-const WIDTH = 1.15;
-const HEIGHT = 1.75;
+/** The doorway between the stone posts (look/rooms: posts at ±0.86, 0.28 wide; lintel at 2.3). */
+const OPEN_W = 1.44;
+const OPEN_H = 2.3;
+/** How far the door swings open, away from the room into the passage. */
+const OPEN_ANGLE = 1.8;
+const OPEN_MS = 1100;
+/** At most this many doors are offered at once; their lights always exist (adding lights recompiles shaders). */
+const MAX_LIT = 4;
+/** The blaze at the end of the passage reaches its vault (the cathedral's is the tallest). */
+const GLOW_H = 6;
+/** How far the light spills into the room. */
+const SPILL = 3.2;
 
-/** Glowing portals in the arches of the doors that are open, coloured by what lies behind them. */
+interface DoorRig {
+  readonly hinge: THREE.Group;
+  /** The hinge's turn when shut. */
+  readonly shut: number;
+  /** Offered doors: the light behind them and its colour. */
+  readonly lit: {
+    readonly glow: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
+    readonly rays: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
+    readonly pool: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
+    readonly light: THREE.PointLight;
+    readonly phase: number;
+  } | null;
+}
+
+/** Light fading away from the door (v) in uneven streaks (u): the alpha of the rays and the floor pool. */
+function raysTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = 64;
+  c.height = 64;
+  const g = c.getContext('2d')!;
+  const img = g.createImageData(64, 64);
+  for (let x = 0; x < 64; x++) {
+    const streak = 0.55 + 0.45 * Math.sin(x * 0.7) * Math.sin(x * 0.23 + 1.3);
+    const edge = Math.min(1, Math.min(x, 63 - x) / 10);
+    for (let y = 0; y < 64; y++) {
+      const fade = (1 - y / 63) ** 1.6;
+      const a = Math.round(255 * fade * streak * edge);
+      const i = (y * 64 + x) * 4;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = a;
+      img.data[i + 3] = 255;
+    }
+  }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.NoColorSpace;
+  return t;
+}
+
+/**
+ * A frustum of light from the doorway (local z = 0, the opening) widening and dropping towards the
+ * floor as it reaches into the room (local −z). v runs from the door outwards, for the fade.
+ */
+function raysGeometry(): THREE.BufferGeometry {
+  const near = { w: OPEN_W / 2, top: OPEN_H, bottom: 0 };
+  const far = { w: OPEN_W / 2 + 0.9, top: 0.9, bottom: 0, z: -SPILL };
+  const n = [
+    [-near.w, near.bottom, 0],
+    [near.w, near.bottom, 0],
+    [near.w, near.top, 0],
+    [-near.w, near.top, 0],
+  ];
+  const f = [
+    [-far.w, far.bottom, far.z],
+    [far.w, far.bottom, far.z],
+    [far.w, far.top, far.z],
+    [-far.w, far.top, far.z],
+  ];
+  const pos: number[] = [];
+  const uv: number[] = [];
+  // Sides: right, top, left (the floor gets its own pool).
+  for (const [a, b] of [
+    [1, 2],
+    [2, 3],
+    [3, 0],
+  ] as const) {
+    const quad = [n[a]!, n[b]!, f[b]!, f[a]!];
+    const quv = [
+      [0, 0],
+      [1, 0],
+      [1, 1],
+      [0, 1],
+    ];
+    for (const i of [0, 1, 2, 0, 2, 3]) {
+      pos.push(...quad[i]!);
+      uv.push(...quv[i]!);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  return g;
+}
+
+/** The patch of light on the floor in front of the door: a trapezoid widening into the room. */
+function poolGeometry(): THREE.BufferGeometry {
+  const w0 = OPEN_W / 2;
+  const w1 = OPEN_W / 2 + 0.9;
+  const pos = [-w0, 0, 0, w0, 0, 0, w1, 0, -SPILL, -w0, 0, 0, w1, 0, -SPILL, -w1, 0, -SPILL];
+  const uv = [0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1];
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  return g;
+}
+
+/**
+ * Wooden doors in every doorway, shut while fighting. Once the room is cleared the offered doors
+ * swing open and light pours out of them in the colour of what lies behind.
+ */
 export class DoorsView {
   readonly group = new THREE.Group();
-  private readonly geometry = new THREE.PlaneGeometry(WIDTH, HEIGHT);
-  private portals: { mesh: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>; phase: number }[] = [];
+  private readonly leafGeometry = new THREE.BoxGeometry(OPEN_W - 0.04, OPEN_H - 0.03, 0.08);
+  private readonly bandGeometry = new THREE.BoxGeometry(OPEN_W - 0.02, 0.07, 0.1);
+  private readonly ringGeometry = new THREE.TorusGeometry(0.07, 0.014, 6, 14);
+  private readonly glowGeometry = new THREE.PlaneGeometry(CELL, GLOW_H);
+  private readonly raysGeo = raysGeometry();
+  private readonly poolGeo = poolGeometry();
+  private readonly raysMap = raysTexture();
+  private readonly wood = new THREE.MeshStandardMaterial({ map: planks(0x4a2e18, 501), roughness: 0.85 });
+  private readonly iron = new THREE.MeshStandardMaterial({
+    map: solid(0x3a3634, 502, 0x5a3010),
+    roughness: 0.5,
+    metalness: 0.3,
+  });
+  private readonly lights: THREE.PointLight[] = [];
+  private doors: DoorRig[] = [];
+  private openStart = -1e9;
   private shownKey = '';
 
-  /** Shows a portal in every offered door (none while fighting). */
-  sync(state: GameState): void {
+  constructor() {
+    for (let i = 0; i < MAX_LIT; i++) {
+      const l = new THREE.PointLight(0xffffff, 0, 7, 1.4);
+      this.lights.push(l);
+      this.group.add(l);
+    }
+  }
+
+  /** Builds the doors of the room; the offered ones open (animated from `now` when they just opened). */
+  sync(state: GameState, now = -1e9): void {
     const run = state.run;
     const offers = run?.phase === 'doors' ? run.doors : [];
-    const key = `${state.seed}:${run?.depth}:${offers.map((o) => `${o.door}${o.reward}${o.patron ?? ''}`).join(',')}`;
+    const roomKey = `${state.seed}:${run?.act}:${run?.depth}`;
+    const key = `${roomKey}:${offers.map((o) => `${o.door}${o.reward}${o.patron ?? ''}`).join(',')}`;
     if (key === this.shownKey) return;
+    const sameRoom = this.shownKey.startsWith(`${roomKey}:`);
     this.shownKey = key;
     this.clear();
-    for (const [i, o] of offers.entries()) {
-      const door = state.room.doors[o.door];
-      if (!door) continue;
-      const d = dirVec(door.dir);
-      const material = new THREE.MeshBasicMaterial({
-        color: new THREE.Color(o.patron ? getPatron(o.patron).color : REWARD_COLORS[o.reward]).multiplyScalar(1.6),
-        transparent: true,
-        opacity: 0.85,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-        fog: false,
-      });
-      const mesh = new THREE.Mesh(this.geometry, material);
-      const back = CELL / 2 - RECESS;
-      mesh.position.set(
-        (door.x + 0.5 + (d.x * back) / CELL) * CELL,
-        HEIGHT / 2 + 0.02,
-        (door.y + 0.5 + (d.y * back) / CELL) * CELL,
-      );
-      mesh.rotation.y = Math.atan2(d.x, d.y);
-      this.group.add(mesh);
-      this.portals.push({ mesh, phase: i * 1.9 });
+    // Doors that open while we watch swing; doors already open (a reload) are shown open.
+    this.openStart = sameRoom ? now : -1e9;
+    let lit = 0;
+    for (const [i, door] of state.room.doors.entries()) {
+      const offer = offers.find((o) => o.door === i);
+      const inward = dirVec(door.dir);
+      const out = { x: -inward.x, y: -inward.y };
+      const ry = Math.atan2(out.x, out.y);
+      // Centre of the doorway, on the face between the room and the door cell.
+      const face = new THREE.Vector3((door.x + 0.5 + inward.x * 0.5) * CELL, 0, (door.y + 0.5 + inward.y * 0.5) * CELL);
+      const across = new THREE.Vector3(out.y, 0, -out.x); // local +X
+      const outV = new THREE.Vector3(out.x, 0, out.y); // local +Z
+
+      const hinge = new THREE.Group();
+      hinge.position
+        .copy(face)
+        .addScaledVector(across, OPEN_W / 2)
+        .addScaledVector(outV, 0.06);
+      hinge.rotation.y = ry;
+      const leaf = new THREE.Mesh(this.leafGeometry, this.wood);
+      leaf.position.set(-OPEN_W / 2, OPEN_H / 2, 0);
+      leaf.castShadow = leaf.receiveShadow = true;
+      hinge.add(leaf);
+      for (const y of [0.4, 1.15, 1.9]) {
+        const band = new THREE.Mesh(this.bandGeometry, this.iron);
+        band.position.set(-OPEN_W / 2, y, 0);
+        hinge.add(band);
+      }
+      const ring = new THREE.Mesh(this.ringGeometry, this.iron);
+      ring.position.set(-OPEN_W + 0.22, 1.05, -0.06);
+      hinge.add(ring);
+      this.group.add(hinge);
+
+      let rig: DoorRig['lit'] = null;
+      if (offer && lit < MAX_LIT) {
+        const color = new THREE.Color(offer.patron ? getPatron(offer.patron).color : REWARD_COLORS[offer.reward]);
+        const additive = (c: THREE.Color, map: THREE.Texture | null) =>
+          new THREE.MeshBasicMaterial({
+            color: c,
+            ...(map ? { alphaMap: map } : {}),
+            transparent: true,
+            opacity: 0,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+            fog: false,
+          });
+        // The far end of the passage blazes with light; rays and a pool of it spill into the room.
+        const glow = new THREE.Mesh(this.glowGeometry, additive(color.clone().multiplyScalar(1.15), null));
+        glow.position
+          .copy(face)
+          .addScaledVector(outV, CELL * 0.95)
+          .setY(GLOW_H / 2);
+        glow.rotation.y = ry;
+        const rays = new THREE.Mesh(this.raysGeo, additive(color.clone().multiplyScalar(0.55), this.raysMap));
+        const pool = new THREE.Mesh(this.poolGeo, additive(color.clone().multiplyScalar(0.7), this.raysMap));
+        for (const m of [rays, pool]) {
+          m.position.copy(face);
+          m.rotation.y = ry;
+        }
+        pool.position.y = 0.012;
+        const light = this.lights[lit]!;
+        light.color.copy(color);
+        light.position.copy(face).addScaledVector(outV, 0.7).setY(1.4);
+        this.group.add(glow, rays, pool);
+        rig = { glow, rays, pool, light, phase: lit * 1.9 };
+        lit++;
+      }
+      this.doors.push({ hinge, shut: ry, lit: rig });
     }
   }
 
   update(now: number): void {
-    for (const p of this.portals) p.mesh.material.opacity = 0.65 + 0.25 * Math.sin(now / 320 + p.phase);
+    const t = Math.min(1, Math.max(0, (now - this.openStart) / OPEN_MS));
+    // The door gives a little, then swings wide and settles.
+    const swing = t < 0.15 ? (t / 0.15) * 0.08 : 0.08 + (1 - (1 - (t - 0.15) / 0.85) ** 3) * 0.92;
+    for (const d of this.doors) {
+      if (!d.lit) continue;
+      d.hinge.rotation.y = d.shut + swing * OPEN_ANGLE;
+      const pulse = 0.92 + 0.08 * Math.sin(now / 380 + d.lit.phase);
+      const k = swing * pulse;
+      d.lit.glow.material.opacity = Math.min(1, swing * 1.4);
+      d.lit.rays.material.opacity = 0.9 * k;
+      d.lit.pool.material.opacity = 0.8 * k;
+      d.lit.light.intensity = 4 * k;
+    }
   }
 
   clear(): void {
-    for (const p of this.portals) {
-      this.group.remove(p.mesh);
-      p.mesh.material.dispose();
+    for (const d of this.doors) {
+      this.group.remove(d.hinge);
+      if (d.lit) {
+        this.group.remove(d.lit.glow, d.lit.rays, d.lit.pool);
+        d.lit.glow.material.dispose();
+        d.lit.rays.material.dispose();
+        d.lit.pool.material.dispose();
+      }
     }
-    this.portals = [];
+    for (const l of this.lights) l.intensity = 0;
+    this.doors = [];
   }
 
   dispose(): void {
     this.clear();
-    this.geometry.dispose();
+    for (const g of [
+      this.leafGeometry,
+      this.bandGeometry,
+      this.ringGeometry,
+      this.glowGeometry,
+      this.raysGeo,
+      this.poolGeo,
+    ])
+      g.dispose();
+    this.raysMap.dispose();
+    this.wood.dispose();
+    this.iron.dispose();
   }
 }

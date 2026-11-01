@@ -518,7 +518,7 @@ export class GameRenderer {
           this.enemyPhase = false;
           this.unitsView.sync(this.target_);
           this.surfacesView.sync(this.target_);
-          this.doorsView.sync(this.target_);
+          this.doorsView.sync(this.target_, now);
           this.altarView.sync(this.target_);
         }
         return;
@@ -673,7 +673,7 @@ export class GameRenderer {
       case 'rewardTaken':
       case 'rewardOffered':
         if (this.target_) {
-          this.doorsView.sync(this.target_);
+          this.doorsView.sync(this.target_, now);
           this.altarView.sync(this.target_);
         }
         return 0;
