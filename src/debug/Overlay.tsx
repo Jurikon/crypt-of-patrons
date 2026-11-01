@@ -18,6 +18,8 @@ export interface OverlayActions {
   toggleModifier(modifierId: string): void;
   toggleItem(itemId: string): void;
   toggleGift(giftId: string): void;
+  /** Hide the menu (F1 does the same). */
+  closeDebug(): void;
   /** Go to a room of an act (ACT.rooms + 1 = its boss). */
   jump(act: number, depth: number): void;
   addClass(classId: string): void;
@@ -45,7 +47,13 @@ export function DebugOverlay({ view, actions }: { view: ViewState; actions: Over
 
   return (
     <div class="debug" data-testid="debug-overlay">
-      <div class="debug-title">{t('debug.title')}</div>
+      <div class="debug-title">
+        {t('debug.title')}
+        <span class="debug-hint">{t('debug.hint')}</span>
+        <button type="button" class="debug-close" onClick={actions.closeDebug} data-testid="debug-close">
+          ✕
+        </button>
+      </div>
       <table>
         <tbody>
           <Row label={t('debug.seed')} value={String(game.seed)} testId="debug-seed" />

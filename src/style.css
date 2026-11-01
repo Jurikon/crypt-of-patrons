@@ -92,10 +92,29 @@ body {
 }
 
 .debug-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: var(--accent);
   margin-bottom: 6px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
+}
+
+.debug-hint {
+  flex: 1;
+  color: var(--ink-dim);
+  font-size: 10px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.debug-close {
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 7px;
+  cursor: pointer;
 }
 
 .debug table {

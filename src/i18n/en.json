@@ -1,7 +1,7 @@
 {
   "game.title": "Crypt of Patrons",
   "prompt.clickToPlay": "Click to play",
-  "prompt.controls": "WASD — step · Q/E — turn · Mouse — look · Tab — top view · ` — debug",
+  "prompt.controls": "WASD — step · Q/E — turn · Mouse — look · Tab — top view · F1 — debug",
   "debug.title": "Debug",
   "debug.seed": "Seed",
   "debug.fps": "FPS",
@@ -418,5 +418,6 @@
   "door.treasure.hint": "An item after an ordinary fight",
   "door.altar.hint": "A patron's gift: a powerful rule of their style",
   "reward.hint.item": "Changes the rules of play; cursed ones trade a big upside for a real downside",
-  "when.linger": "Whoever of the other side steps in or ends a turn here"
+  "when.linger": "Whoever of the other side steps in or ends a turn here",
+  "debug.hint": "F1 to open or close"
 }

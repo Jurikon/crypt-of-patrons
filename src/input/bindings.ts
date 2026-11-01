@@ -43,7 +43,11 @@ export const DEFAULT_BINDINGS: Bindings = {
   Escape: 'cancel',
   KeyX: 'cancel',
   Tab: 'topView',
+  // The debug menu: F1, or the key left of 1 (` on most keyboards; on Mac ISO keyboards that key is
+  // § / ± and reports IntlBackslash).
+  F1: 'toggleDebug',
   Backquote: 'toggleDebug',
+  IntlBackslash: 'toggleDebug',
   KeyR: 'newSeed',
 };
 

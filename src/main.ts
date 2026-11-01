@@ -363,6 +363,7 @@ const actions: AppActions = {
   toggleModifier: (modifierId: string) => dispatch({ type: 'debugModifier', playerId: PLAYER_ID, modifierId }),
   toggleItem: (itemId: string) => dispatch({ type: 'debugItem', playerId: PLAYER_ID, itemId }),
   toggleGift: (giftId: string) => dispatch({ type: 'debugGift', playerId: PLAYER_ID, giftId }),
+  closeDebug: () => store.set({ debugOpen: false }),
   jump: (act: number, depth: number) => dispatch({ type: 'debugJump', playerId: PLAYER_ID, act, depth }),
   addClass: (id: string) => dispatch({ type: 'debugClass', playerId: PLAYER_ID, classId: id }),
   toggleQuality: () => {
