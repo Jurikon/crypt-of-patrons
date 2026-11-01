@@ -4,6 +4,7 @@ import {
   ABILITY_SLOTS,
   ACT,
   CLASSES,
+  EVENTS,
   getAbility,
   getGift,
   getItem,
@@ -15,6 +16,7 @@ import {
 } from '../content';
 import { actAllies, advanceEnemies, intentCells, nextAttack } from './ai';
 import { makeEnemy } from './encounter';
+import { buy, chooseEvent, shopService } from './peaceful';
 import { worldEffects } from './world';
 import {
   addClass,
@@ -93,6 +95,12 @@ export function apply(prev: GameState, command: Command): ApplyResult {
         enterDoor(state, door, events);
         break;
       }
+      const npc = state.run?.npc;
+      if (npc && npc.x === to.x && npc.y === to.y) {
+        // The merchant or the event's object: nobody walks through it; the UI opens its screen.
+        events.push({ type: 'npcBumped', unitId: player.id, at: to });
+        break;
+      }
       const occupant = unitAt(state, to.x, to.y);
       const baseAttack = player.abilities[0];
       const foe = occupant && !isPlayer(state, occupant) && !state.allies.includes(occupant as never);
@@ -154,6 +162,10 @@ export function apply(prev: GameState, command: Command): ApplyResult {
         settle(eng);
       } else if (command.action === 'altarNext' && state.run) {
         state.run.forceAltar = true;
+      } else if (command.action === 'merchantNext' && state.run) {
+        state.run.forceMerchant = true;
+      } else if (command.action === 'gold' && state.run) {
+        state.run.gold += 50;
       } else if (command.action === 'toBoss' && state.run) {
         enterRoom(state, ACT.rooms + 1, 'boss', null, events);
       }
@@ -214,6 +226,27 @@ export function apply(prev: GameState, command: Command): ApplyResult {
       if (!CLASSES.some((c) => c.id === command.classId)) return reject('unknown_command');
       addClass(eng, player, command.classId);
       events.push({ type: 'debug', action: 'class' });
+      break;
+    }
+    case 'debugEvent': {
+      if (!state.run || !EVENTS.some((e) => e.id === command.eventId)) return reject('unknown_command');
+      state.run.forceEvent = command.eventId;
+      events.push({ type: 'debug', action: 'event' });
+      break;
+    }
+    case 'buy': {
+      const r = buy(eng, command.index, command.replace);
+      if (r) return reject(r);
+      break;
+    }
+    case 'shopService': {
+      const r = shopService(eng, command.service, command.itemId);
+      if (r) return reject(r);
+      break;
+    }
+    case 'eventChoice': {
+      const r = chooseEvent(eng, command.index);
+      if (r) return reject(r);
       break;
     }
     default: {

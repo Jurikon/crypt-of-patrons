@@ -16,6 +16,9 @@ const DOOR_ICONS: Record<RewardKind, string> = {
   initiation: '✶',
   treasure: '◆',
   altar: '✟',
+  gold: '¤',
+  merchant: '⚖',
+  event: '?',
 };
 
 /** What a fight behind a door asks. */

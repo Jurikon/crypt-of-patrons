@@ -1,4 +1,4 @@
-import { createRng, float, fork, shuffle, weighted, type Rng } from '../core/rng';
+import { createRng, float, fork, int, shuffle, weighted, type Rng } from '../core/rng';
 import {
   ABILITY_SLOTS,
   ACT,
@@ -22,7 +22,8 @@ import {
   type RuleDef,
 } from '../content';
 import type { GameEvent, RejectReason } from './commands';
-import { gainRule, type Engine } from './engine';
+import { createEngine, gainRule, type Engine } from './engine';
+import { applyNextFight, openEvent, openShop, pickEvent } from './peaceful';
 import { playerRules, statOf } from './units';
 import {
   populateRoom,
@@ -46,7 +47,7 @@ const rngFor = (state: GameState, name: string) => {
 };
 
 /** Abilities of every class the hero has (start kits and pools) not owned yet. */
-function newAbilities(p: Player): string[] {
+export function newAbilities(p: Player): string[] {
   const ids = p.classes.flatMap((c) => [...getClass(c).abilities.slice(1), ...getClass(c).pool]);
   return [...new Set(ids)].filter((id) => !p.abilities.includes(id));
 }
@@ -125,8 +126,9 @@ function pickPatron(rng: Rng, p: Player): string {
   return (pool[Math.floor(float(rng) * pool.length)] ?? PATRONS[0]!).id;
 }
 
-const newModifiers = (p: Player) => MODIFIERS.filter((m) => !p.modifiers.includes(m.id) && fits(p, m)).map((m) => m.id);
-const newItems = (p: Player) => ITEMS.filter((i) => !p.items.includes(i.id) && fits(p, i)).map((i) => i.id);
+export const newModifiers = (p: Player) =>
+  MODIFIERS.filter((m) => !p.modifiers.includes(m.id) && fits(p, m)).map((m) => m.id);
+export const newItems = (p: Player) => ITEMS.filter((i) => !p.items.includes(i.id) && fits(p, i)).map((i) => i.id);
 const otherClasses = (p: Player) => CLASSES.map((c) => c.id).filter((id) => !p.classes.includes(id));
 
 /**
@@ -146,7 +148,7 @@ export function addClass(eng: Engine, p: Player, classId: string): void {
 }
 
 /** Upgrades still worth offering: a cooldown above zero to cut, or damage to raise. */
-function upgradeOptions(p: Player): RewardOption[] {
+export function upgradeOptions(p: Player): RewardOption[] {
   const out: RewardOption[] = [];
   for (const id of p.abilities) {
     if (effectiveCooldown(p, id) > 0) out.push({ kind: 'upgrade', abilityId: id, upgrade: 'cooldown' });
@@ -184,12 +186,12 @@ export function upgradedEffects(p: Player, abilityId: string): readonly EffectSp
 }
 
 /** Up to ACT.offer options for a reward; missing abilities or modifiers are filled with upgrades. */
-function makeOffer(rng: Rng, p: Player, reward: RewardKind, patron: string | null = null): RewardOption[] {
+export function makeOffer(rng: Rng, p: Player, reward: RewardKind, patron: string | null = null): RewardOption[] {
   if (reward === 'altar') return patron ? altarOffer(rng, p, patron) : [];
   const picks: RewardOption[] = [];
   if (reward === 'ability') for (const id of shuffle(rng, newAbilities(p))) picks.push({ kind: 'ability', id });
   if (reward === 'modifier') for (const id of shuffle(rng, newModifiers(p))) picks.push({ kind: 'modifier', id });
-  if (reward === 'elite' || reward === 'treasure' || reward === 'boss')
+  if (reward === 'elite' || reward === 'treasure' || reward === 'boss' || reward === 'gold')
     for (const id of shuffle(rng, newItems(p))) picks.push({ kind: 'item', id });
   if (reward === 'initiation') for (const id of shuffle(rng, otherClasses(p))) picks.push({ kind: 'class', id });
   const offer = picks.slice(0, ACT.offer);
@@ -207,6 +209,7 @@ export function roomCleared(state: GameState, events: GameEvent[]): void {
   if (!run || !p || run.phase !== 'combat') return;
   run.turns += state.combat.turn;
   if (run.kind !== 'rest') run.log.push({ type: 'cleared', depth: run.depth, turns: state.combat.turn });
+  dropGold(state, events);
   if (run.kind === 'boss') {
     // The boss falls: an item for the road ahead, then the next act (or the run is won).
     run.offerKind = 'boss';
@@ -219,6 +222,12 @@ export function roomCleared(state: GameState, events: GameEvent[]): void {
     actDone(state, events);
     return;
   }
+  if (run.pending === 'gold') {
+    // A gold door: a pouch instead of a pick.
+    const [lo, hi] = ACT.gold.door;
+    gainGold(state, int(rngFor(state, 'pouch'), lo, hi), events);
+    run.pending = null;
+  }
   if (run.pending) {
     run.offerKind = run.pending;
     run.offer = makeOffer(rngFor(state, 'reward'), p, run.pending, run.patron);
@@ -230,6 +239,26 @@ export function roomCleared(state: GameState, events: GameEvent[]): void {
     }
   }
   openDoors(state, events);
+}
+
+function gainGold(state: GameState, amount: number, events: GameEvent[]): void {
+  const run = state.run;
+  if (!run || amount <= 0) return;
+  run.gold += amount;
+  run.log.push({ type: 'gold', depth: run.depth, amount });
+  events.push({ type: 'goldGained', amount, gold: run.gold });
+}
+
+/** Gold for a won fight: a little for every room, more for elite rooms and bosses. */
+function dropGold(state: GameState, events: GameEvent[]): void {
+  const run = state.run;
+  if (!run || (run.kind !== 'combat' && run.kind !== 'elite' && run.kind !== 'boss')) return;
+  const [lo, hi] = ACT.gold.room;
+  const amount =
+    int(rngFor(state, 'gold'), lo, hi) +
+    (run.kind === 'elite' ? ACT.gold.elite : 0) +
+    (run.kind === 'boss' ? ACT.gold.boss : 0);
+  gainGold(state, amount, events);
 }
 
 /** After a boss: on to the next act, or, after the last, the run is won. */
@@ -251,6 +280,8 @@ export function enterAct(state: GameState, act: number, events: GameEvent[]): vo
   run.elites = 0;
   run.treasures = 0;
   run.altars = 0;
+  run.merchant = false;
+  run.events = 0;
   for (const p of state.players) if (p.hp > 0) p.hp = Math.min(p.maxHp, p.hp + Math.ceil(p.maxHp * ACT.actHeal));
   run.log.push({ type: 'act', act });
   events.push({ type: 'actEntered', act });
@@ -276,7 +307,7 @@ export function runLost(state: GameState, events: GameEvent[]): void {
 }
 
 /** Lights the exits: each gets a reward kind (different ones when possible); after the last room, one door to the boss. */
-function openDoors(state: GameState, events: GameEvent[]): void {
+export function openDoors(state: GameState, events: GameEvent[]): void {
   const run = state.run;
   const p = state.players[0];
   if (!run || !p) return;
@@ -296,6 +327,7 @@ function openDoors(state: GameState, events: GameEvent[]): void {
       if (w.kind === 'treasure') return run.treasures < ACT.maxTreasures && run.depth >= 2 && newItems(p).length > 0;
       if (w.kind === 'rest') return run.depth >= 2 && run.kind !== 'rest';
       if (w.kind === 'altar') return run.altars < ACT.maxAltars && run.depth >= 2;
+      if (w.kind === 'event') return run.events < ACT.maxEvents && run.kind !== 'event' && !!pickEvent(rng, state);
       return true;
     });
     const used = new Set<RewardKind>();
@@ -310,11 +342,36 @@ function openDoors(state: GameState, events: GameEvent[]): void {
       run.forceAltar || (run.act === 1 && run.altars === 0 && run.depth <= 2 && (run.depth === 2 || float(rng) < 0.5));
     run.forceAltar = false;
     let altarPlaced = false;
+    // The merchant: once per act, behind a door into one of rooms merchantFrom..merchantBy.
+    const next = run.depth + 1;
+    const merchantNow =
+      run.forceMerchant ||
+      (!run.merchant &&
+        run.kind !== 'merchant' &&
+        next >= ACT.merchantFrom &&
+        next <= ACT.merchantBy &&
+        (next === ACT.merchantBy || float(rng) < 0.5));
+    run.forceMerchant = false;
+    let merchantPlaced = false;
+    const forcedEvent = run.forceEvent;
     for (const [n, x] of exits.entries()) {
       if (initiate && n === 0) {
         run.initiation = true;
         used.add('initiation');
         doors.push({ door: x.i, reward: 'initiation' });
+        continue;
+      }
+      if (merchantNow && !merchantPlaced && (exits.length > 1 || next >= ACT.merchantBy)) {
+        merchantPlaced = true;
+        run.merchant = true;
+        used.add('merchant');
+        doors.push({ door: x.i, reward: 'merchant' });
+        continue;
+      }
+      if (forcedEvent && !used.has('event')) {
+        used.add('event');
+        run.events++;
+        doors.push({ door: x.i, reward: 'event', event: forcedEvent });
         continue;
       }
       if (altarNow && !altarPlaced) {
@@ -332,18 +389,56 @@ function openDoors(state: GameState, events: GameEvent[]): void {
           )
         : 'upgrade';
       used.add(kind);
+      if (kind === 'event') {
+        const event = pickEvent(rng, state);
+        if (event) {
+          run.events++;
+          doors.push({ door: x.i, reward: 'event', event });
+          continue;
+        }
+      }
       const goal = kind === 'rest' ? 'clear' : weighted(rng, GOAL_WEIGHTS);
       const extra = goal !== 'clear' ? { goal } : {};
       doors.push(
         kind === 'altar'
           ? { door: x.i, reward: kind, patron: pickPatron(rng, p), ...extra }
-          : { door: x.i, reward: kind, ...extra },
+          : { door: x.i, reward: kind === 'event' ? 'upgrade' : kind, ...extra },
       );
     }
   }
+  run.forceEvent = null;
   run.doors = doors;
   run.phase = 'doors';
   events.push({ type: 'doorsOpened', doors });
+}
+
+/** Gives the hero an option (a reward pick or a purchase). A new ability with every slot full needs `replace`. */
+export function grantOption(
+  eng: Engine,
+  p: Player,
+  option: RewardOption,
+  replace: number | undefined,
+): RejectReason | null {
+  const { state } = eng;
+  if (option.kind === 'ability') {
+    if (p.abilities.length > ABILITY_SLOTS) {
+      if (replace === undefined || replace < 1 || replace > ABILITY_SLOTS) return 'slot_needed';
+      p.abilities[replace] = option.id;
+    } else p.abilities.push(option.id);
+  } else if (option.kind === 'modifier') {
+    p.modifiers.push(option.id);
+    gainRule(eng, p, getModifier(option.id).onGain);
+  } else if (option.kind === 'item') {
+    p.items.push(option.id);
+    gainRule(eng, p, getItem(option.id).onGain);
+  } else if (option.kind === 'class') addClass(eng, p, option.id);
+  else if (option.kind === 'gift') {
+    p.gifts.push(option.id);
+    gainRule(eng, p, getGift(option.id).onGain);
+  } else
+    for (let i = 0; i <= statOf(state, p, 'upgradeBonus'); i++)
+      p.upgrades.push({ abilityId: option.abilityId, kind: option.upgrade });
+  return null;
 }
 
 /** Takes a reward option (or none), then opens the doors. */
@@ -354,24 +449,10 @@ export function chooseReward(eng: Engine, index: number | null, replace: number 
   if (!run || !p || run.phase !== 'reward') return 'no_reward';
   const option = index === null ? null : run.offer[index];
   if (index !== null && !option) return 'no_reward';
-  if (option?.kind === 'ability') {
-    if (p.abilities.length > ABILITY_SLOTS) {
-      if (replace === undefined || replace < 1 || replace > ABILITY_SLOTS) return 'slot_needed';
-      p.abilities[replace] = option.id;
-    } else p.abilities.push(option.id);
-  } else if (option?.kind === 'modifier') {
-    p.modifiers.push(option.id);
-    gainRule(eng, p, getModifier(option.id).onGain);
-  } else if (option?.kind === 'item') {
-    p.items.push(option.id);
-    gainRule(eng, p, getItem(option.id).onGain);
-  } else if (option?.kind === 'class') addClass(eng, p, option.id);
-  else if (option?.kind === 'gift') {
-    p.gifts.push(option.id);
-    gainRule(eng, p, getGift(option.id).onGain);
-  } else if (option?.kind === 'upgrade')
-    for (let i = 0; i <= statOf(state, p, 'upgradeBonus'); i++)
-      p.upgrades.push({ abilityId: option.abilityId, kind: option.upgrade });
+  if (option) {
+    const r = grantOption(eng, p, option, replace);
+    if (r) return r;
+  }
   run.log.push({ type: 'reward', depth: run.depth, option: option ?? null });
   run.offer = [];
   events.push({ type: 'rewardTaken', option: option ?? null });
@@ -397,13 +478,21 @@ export function enterDoor(state: GameState, door: number, events: GameEvent[]): 
   const run = state.run;
   const offer = run?.doors.find((o) => o.door === door);
   if (!run || !offer) return;
-  const kind: RoomKind =
-    offer.reward === 'boss' ? 'boss' : offer.reward === 'rest' ? 'rest' : offer.reward === 'elite' ? 'elite' : 'combat';
+  const peaceful: Partial<Record<RewardKind, RoomKind>> = {
+    boss: 'boss',
+    rest: 'rest',
+    elite: 'elite',
+    merchant: 'merchant',
+    event: 'event',
+  };
+  let kind: RoomKind = peaceful[offer.reward] ?? 'combat';
+  // An event's price can make the next ordinary fight an elite one.
+  if (kind === 'combat' && run.nextFight?.elite) kind = 'elite';
   const pending: RewardKind | null = kind === 'combat' || kind === 'elite' ? offer.reward : null;
   if (offer.reward === 'treasure') run.treasures++;
   if (offer.reward === 'altar') run.altars++;
   run.patron = offer.patron ?? null;
-  enterRoom(state, run.depth + 1, kind, pending, events, offer.goal ?? 'clear');
+  enterRoom(state, run.depth + 1, kind, pending, events, offer.goal ?? 'clear', offer.event ?? null);
 }
 
 /**
@@ -417,9 +506,13 @@ export function enterRoom(
   pending: RewardKind | null,
   events: GameEvent[],
   goal: RoomGoal = 'clear',
+  eventId: string | null = null,
 ): void {
   const run = state.run;
   if (!run) return;
+  run.shop = null;
+  run.event = null;
+  run.npc = null;
   run.depth = depth;
   run.kind = kind;
   run.pending = pending;
@@ -443,7 +536,14 @@ export function enterRoom(
   }
   populateRoom(state, depth, kind, true, kind === 'combat' || kind === 'elite' ? goal : 'clear');
   events.push({ type: 'roomEntered', depth, kind });
-  // A rest room has nobody to fight: its doors open at once.
+  if (kind === 'merchant') openShop(state);
+  if (kind === 'event' && eventId) {
+    // Nobody to fight, but the doors wait for the choice.
+    openEvent(state, eventId);
+    return;
+  }
+  if (kind === 'combat' || kind === 'elite' || kind === 'boss') applyNextFight(createEngine(state, events));
+  // A rest room (or the merchant's) has nobody to fight: its doors open at once.
   if (state.combat.status === 'won') roomCleared(state, events);
 }
 

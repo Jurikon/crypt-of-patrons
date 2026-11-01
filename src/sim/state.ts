@@ -14,7 +14,7 @@ import { assignAffixes, placeCorpses, placeEncounter, placeFeatures, placeGoalAn
 import { declareIntentsInPlace } from './ai';
 import { applyPerks } from './run';
 
-export const STATE_VERSION = 11;
+export const STATE_VERSION = 12;
 
 export interface Cooldown {
   readonly abilityId: string;
@@ -131,7 +131,7 @@ export interface Surface {
   readonly side: Side;
 }
 
-export type RoomKind = 'combat' | 'elite' | 'rest' | 'boss';
+export type RoomKind = 'combat' | 'elite' | 'rest' | 'boss' | 'merchant' | 'event';
 
 /** A door's offer once the room is cleared: which door (index into `room.doors`) and what lies behind it. */
 export interface DoorOffer {
@@ -141,6 +141,23 @@ export interface DoorOffer {
   readonly patron?: string;
   /** What the fight behind it asks (plain clearing when absent). */
   readonly goal?: RoomGoal;
+  /** Event doors: which event waits behind (M6c). */
+  readonly event?: string;
+}
+
+/** One thing on the merchant's table (M6c). */
+export interface ShopWare {
+  readonly option: RewardOption;
+  readonly price: number;
+  sold: boolean;
+}
+
+/** How the next fight starts, set by an event (M6c). */
+export interface NextFight {
+  readonly status?: { readonly id: string; readonly turns: number };
+  readonly stunEnemies?: number;
+  readonly extraEnemies?: number;
+  readonly elite?: boolean;
 }
 
 /** One reward option on the pick-1-of-3 screen. */
@@ -158,7 +175,10 @@ export type RunLogEntry =
   | { readonly type: 'reward'; readonly depth: number; readonly option: RewardOption | null }
   | { readonly type: 'cleared'; readonly depth: number; readonly turns: number }
   | { readonly type: 'end'; readonly depth: number; readonly result: 'won' | 'lost' }
-  | { readonly type: 'act'; readonly act: number };
+  | { readonly type: 'act'; readonly act: number }
+  | { readonly type: 'gold'; readonly depth: number; readonly amount: number }
+  | { readonly type: 'bought'; readonly depth: number; readonly what: string; readonly price: number }
+  | { readonly type: 'event'; readonly depth: number; readonly event: string; readonly option: number };
 
 /**
  * The run (GDD 1): an act of rooms joined by doors. Everything comes from the run seed, so seed +
@@ -178,8 +198,8 @@ export interface RunState {
   /** Room number in the act, 1-based; ACT.rooms + 1 is the boss room. */
   depth: number;
   kind: RoomKind;
-  /** fighting → (reward) → doors → next room; or the run is over. */
-  phase: 'combat' | 'reward' | 'doors' | 'won' | 'lost';
+  /** fighting → (reward) → doors → next room; an event room waits for a choice first; or the run is over. */
+  phase: 'combat' | 'reward' | 'doors' | 'event' | 'won' | 'lost';
   /** Reward for clearing the current room (from the door taken into it). */
   pending: RewardKind | null;
   /** For an altar room: whose altar. */
@@ -197,6 +217,24 @@ export interface RunState {
   /** Turns spent in finished rooms. */
   turns: number;
   log: RunLogEntry[];
+  /** Gold for the merchant (M6c); spent within the run, never carried over. */
+  gold: number;
+  /** The merchant has been offered on a door in this act. */
+  merchant: boolean;
+  /** Event doors offered in this act, and every event met in the run (none repeats). */
+  events: number;
+  seenEvents: string[];
+  /** In a merchant room: the wares on the table and how often they were rerolled. */
+  shop: { wares: ShopWare[]; rerolls: number } | null;
+  /** In an event room: which event, until a choice is made. */
+  event: string | null;
+  /** The merchant or the event's object: a cell nobody can step on. */
+  npc: Vec2 | null;
+  /** The next fight starts differently (an event's price or gift). */
+  nextFight: NextFight | null;
+  /** Debug: the next doors include a merchant / this event. */
+  forceMerchant: boolean;
+  forceEvent: string | null;
 }
 
 /**
@@ -309,6 +347,16 @@ export function createGame(seed: number, opts: CreateGameOptions = {}): GameStat
       treasures: 0,
       turns: 0,
       log: [{ type: 'room', depth: 1, kind: 'combat' }],
+      gold: 0,
+      merchant: false,
+      events: 0,
+      seenEvents: [],
+      shop: null,
+      event: null,
+      npc: null,
+      nextFight: null,
+      forceMerchant: false,
+      forceEvent: null,
     },
   };
   state.players = (opts.playerIds ?? ['p1']).map((id) =>
@@ -349,7 +397,7 @@ export function populateRoom(
   state.surfaces = [];
   state.omen = null;
   state.combat = { turn: 1, phase: 'player', status: 'active', ...(goal !== 'clear' ? { goal } : {}) };
-  if (enemies && kind !== 'rest') {
+  if (enemies && kind !== 'rest' && kind !== 'merchant' && kind !== 'event') {
     state.enemies = placeEncounter(fork(root, label('encounter', depth, act)), state, depth, kind, goal);
     if (kind !== 'boss') placeGoalAndObjects(fork(root, label('goal', depth, act)), state, goal, biomeOf(state));
     assignAffixes(fork(root, label('affix', depth, act)), state, kind);

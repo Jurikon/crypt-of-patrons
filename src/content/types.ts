@@ -534,7 +534,60 @@ export type RewardKind =
   /** Pick an item. */
   | 'treasure'
   /** A patron's altar: pick one of their gifts. */
-  | 'altar';
+  | 'altar'
+  /** A pouch of gold (M6c). */
+  | 'gold'
+  /** A peaceful room with a merchant (M6c). */
+  | 'merchant'
+  /** A peaceful room with a choice (M6c). */
+  | 'event';
 
 /** Ability upgrades (a general reward, M3): faster cooldown or one more damage on every hit. */
 export type UpgradeKind = 'cooldown' | 'damage';
+
+/**
+ * What an event choice does (M6c). A closed set of general outcomes; events are data built from them,
+ * and the engine never asks which event it is running.
+ */
+export type EventEffect =
+  /** Gold to the purse (negative: paid). */
+  | { readonly kind: 'gold'; readonly add: number }
+  /** Health: healed (positive) or lost (negative; never below 1). */
+  | { readonly kind: 'hp'; readonly add: number }
+  | { readonly kind: 'maxHp'; readonly add: number }
+  /** Opens a reward screen of this kind (pick 1 of 3). */
+  | { readonly kind: 'reward'; readonly reward: RewardKind }
+  /** A random modifier you hold is swapped for a random new one. */
+  | { readonly kind: 'swapModifier' }
+  /** A random ability (not the base attack) is lost; `upgrades` random upgrades go to the rest. */
+  | { readonly kind: 'sacrifice'; readonly upgrades: number }
+  /** The next fight starts differently: a status on the heroes, a stun on the enemies, more of them, or elite. */
+  | {
+      readonly kind: 'nextFight';
+      readonly status?: { readonly id: string; readonly turns: number };
+      readonly stunEnemies?: number;
+      readonly extraEnemies?: number;
+      readonly elite?: boolean;
+    }
+  /** A fight starts right here: this enemy rises where the event's object stood. */
+  | { readonly kind: 'fight'; readonly enemy: string; readonly elite?: boolean };
+
+export interface EventOption {
+  readonly textKey: string;
+  /** Paid up front; an option you cannot pay is greyed out. Health costs never kill. */
+  readonly cost?: { readonly gold?: number; readonly hp?: number };
+  /** One outcome is drawn by weight (the chances are written on the option). */
+  readonly outcomes: readonly { readonly weight: number; readonly effects: readonly EventEffect[] }[];
+}
+
+export interface EventDef {
+  readonly id: string;
+  readonly nameKey: string;
+  readonly textKey: string;
+  /** Only in these biomes (anywhere when absent). */
+  readonly biomes?: readonly string[];
+  /** What stands in the middle of the room (render/look/creatureKit PROPS). */
+  readonly prop: string;
+  /** The last option is always walking away. */
+  readonly options: readonly EventOption[];
+}

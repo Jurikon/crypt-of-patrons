@@ -16,6 +16,9 @@ export const REWARD_COLORS: Record<RewardKind, number> = {
   initiation: 0xffffff,
   treasure: 0xffa020,
   altar: 0xffffff,
+  gold: 0xffc830,
+  merchant: 0xff9a40,
+  event: 0xc890ff,
 };
 
 /** The doorway between the stone posts (look/rooms: posts at ±0.86, 0.28 wide; lintel at 2.3). */

@@ -1,5 +1,7 @@
 import type {
   AffixDef,
+  EventDef,
+  EventOption,
   BiomeDef,
   PerkDef,
   RoomGoal,
@@ -1837,11 +1839,164 @@ export const ACT = {
   /** Extra health of elite enemies, and extra enemies in an elite room. */
   eliteHp: 2,
   eliteExtra: 1,
+  /** Gold (M6c): per cleared room (a range), extra for elite and boss rooms, and a gold door's pouch. */
+  gold: { room: [3, 5], elite: 5, boss: 10, door: [12, 18] },
+  /** The merchant shows up once per act, behind a door into one of rooms merchantFrom..merchantBy. */
+  merchantFrom: 2,
+  merchantBy: 4,
+  /** Event rooms at most per act. */
+  maxEvents: 2,
 } as const;
+
+/** The merchant's prices and wares (M6c). */
+export const SHOP = {
+  /** Abilities or modifiers on sale, and items. */
+  rules: 2,
+  items: 2,
+  price: { ability: 20, modifier: 15, item: 25, cursedItem: 15 },
+  /** Healing: share of max health, and its price. */
+  heal: { share: 0.5, price: 10 },
+  /** Taking off a cursed item. */
+  uncurse: 15,
+  /** New wares. */
+  reroll: 5,
+} as const;
+
+/** Event rooms (M6c): a choice with its price in plain sight. The last option is always walking away. */
+const leave: EventOption = { textKey: 'event.leave', outcomes: [{ weight: 1, effects: [] }] };
+export const EVENTS: readonly EventDef[] = [
+  {
+    id: 'bloodWell',
+    nameKey: 'event.bloodWell',
+    textKey: 'event.bloodWell.text',
+    prop: 'well',
+    options: [
+      {
+        textKey: 'event.bloodWell.drink',
+        cost: { hp: 4 },
+        outcomes: [{ weight: 1, effects: [{ kind: 'reward', reward: 'treasure' }] }],
+      },
+      leave,
+    ],
+  },
+  {
+    id: 'sleepingSarcophagus',
+    nameKey: 'event.sleepingSarcophagus',
+    textKey: 'event.sleepingSarcophagus.text',
+    biomes: ['crypt'],
+    prop: 'sarcophagusProp',
+    options: [
+      {
+        textKey: 'event.sleepingSarcophagus.open',
+        outcomes: [
+          { weight: 1, effects: [{ kind: 'reward', reward: 'treasure' }] },
+          { weight: 1, effects: [{ kind: 'fight', enemy: 'skeletonWarrior', elite: true }] },
+        ],
+      },
+      leave,
+    ],
+  },
+  {
+    id: 'deadMensDice',
+    nameKey: 'event.deadMensDice',
+    textKey: 'event.deadMensDice.text',
+    prop: 'dice',
+    options: [
+      {
+        textKey: 'event.deadMensDice.bet',
+        cost: { gold: 10 },
+        outcomes: [
+          { weight: 1, effects: [{ kind: 'gold', add: 25 }] },
+          { weight: 1, effects: [] },
+        ],
+      },
+      leave,
+    ],
+  },
+  {
+    id: 'woundedPilgrim',
+    nameKey: 'event.woundedPilgrim',
+    textKey: 'event.woundedPilgrim.text',
+    prop: 'pilgrim',
+    options: [
+      {
+        textKey: 'event.woundedPilgrim.give',
+        cost: { gold: 10 },
+        outcomes: [{ weight: 1, effects: [{ kind: 'maxHp', add: 3 }] }],
+      },
+      {
+        textKey: 'event.woundedPilgrim.rob',
+        outcomes: [
+          {
+            weight: 1,
+            effects: [
+              { kind: 'gold', add: 15 },
+              { kind: 'nextFight', elite: true },
+            ],
+          },
+        ],
+      },
+      leave,
+    ],
+  },
+  {
+    id: 'mycelium',
+    nameKey: 'event.mycelium',
+    textKey: 'event.mycelium.text',
+    biomes: ['catacombs'],
+    prop: 'mushrooms',
+    options: [
+      {
+        textKey: 'event.mycelium.eat',
+        outcomes: [
+          {
+            weight: 1,
+            effects: [
+              { kind: 'hp', add: 6 },
+              { kind: 'nextFight', status: { id: 'poison', turns: 3 } },
+            ],
+          },
+        ],
+      },
+      leave,
+    ],
+  },
+  {
+    id: 'mirror',
+    nameKey: 'event.mirror',
+    textKey: 'event.mirror.text',
+    prop: 'mirror',
+    options: [{ textKey: 'event.mirror.swap', outcomes: [{ weight: 1, effects: [{ kind: 'swapModifier' }] }] }, leave],
+  },
+  {
+    id: 'bell',
+    nameKey: 'event.bell',
+    textKey: 'event.bell.text',
+    biomes: ['cathedral'],
+    prop: 'bell',
+    options: [
+      {
+        textKey: 'event.bell.ring',
+        outcomes: [{ weight: 1, effects: [{ kind: 'nextFight', stunEnemies: 1, extraEnemies: 1 }] }],
+      },
+      leave,
+    ],
+  },
+  {
+    id: 'bargainAltar',
+    nameKey: 'event.bargainAltar',
+    textKey: 'event.bargainAltar.text',
+    prop: 'bargainAltar',
+    options: [
+      { textKey: 'event.bargainAltar.give', outcomes: [{ weight: 1, effects: [{ kind: 'sacrifice', upgrades: 2 }] }] },
+      leave,
+    ],
+  },
+];
 
 /** How often each kind of reward shows up on doors (only kinds still available are drawn). */
 export const DOOR_WEIGHTS: readonly {
-  readonly kind: 'ability' | 'modifier' | 'upgrade' | 'rest' | 'elite' | 'treasure' | 'altar';
+  readonly kind: 'ability' | 'modifier' | 'upgrade' | 'rest' | 'elite' | 'treasure' | 'altar' | 'gold' | 'event';
   readonly weight: number;
 }[] = [
   { kind: 'ability', weight: 3 },
@@ -1851,6 +2006,8 @@ export const DOOR_WEIGHTS: readonly {
   { kind: 'elite', weight: 1 },
   { kind: 'treasure', weight: 1 },
   { kind: 'altar', weight: 2 },
+  { kind: 'gold', weight: 1 },
+  { kind: 'event', weight: 2 },
 ];
 
 /** Encounter size by depth in the act: weights for 2, 3, 4, 5 enemies. */
@@ -1904,3 +2061,4 @@ export const getEnemy = byId([...ENEMIES, ...OBJECTS], 'enemy');
 export const getBiome = byId(BIOMES, 'biome');
 export const getAffix = byId(AFFIXES, 'affix');
 export const getPerk = byId(PERKS, 'perk');
+export const getEvent = byId(EVENTS, 'event');

@@ -1,8 +1,8 @@
 // Headless random-play bot. Plays whole fights through `apply` and reports how they ended.
 // Run: pnpm bot [fights] [firstSeed]
 import { createRng, pick, type Rng } from '../src/core/rng';
-import { ABILITY_SLOTS, CLASSES, getAbility, getClass, MODIFIERS } from '../src/content';
-import { apply, createGame, preview, validTargets, type Command, type GameState } from '../src/sim';
+import { ABILITY_SLOTS, CLASSES, getAbility, getClass, getEvent, MODIFIERS, SHOP } from '../src/content';
+import { apply, canAfford, createGame, preview, validTargets, type Command, type GameState } from '../src/sim';
 
 export interface FightResult {
   readonly seed: number;
@@ -83,7 +83,9 @@ function firstStep(state: GameState, goal: (x: number, y: number) => boolean): n
   const g = state.room.grid;
   const p = state.players[0]!;
   // Own summons are no obstacle: walking into one trades places with it.
-  const occupied = (x: number, y: number) => state.enemies.some((u) => u.x === x && u.y === y);
+  const npc = state.run?.npc;
+  const occupied = (x: number, y: number) =>
+    state.enemies.some((u) => u.x === x && u.y === y) || (!!npc && npc.x === x && npc.y === y);
   const first = new Map<number, number>();
   const queue: { x: number; y: number }[] = [{ x: p.x, y: p.y }];
   first.set(p.y * g.w + p.x, -1);
@@ -202,7 +204,27 @@ function runAction(rng: Rng, state: GameState, strategy: Strategy, altars = fals
       ? { type: 'chooseReward', playerId: p.id, index, replace: ABILITY_SLOTS }
       : { type: 'chooseReward', playerId: p.id, index };
   }
+  if (run.phase === 'event' && run.event) {
+    // Events: a random option it can pay for (the last one, walking away, is always free).
+    const options = getEvent(run.event).options;
+    const affordable = options.map((o, i) => ({ o, i })).filter(({ o }) => canAfford(state, p, o.cost));
+    const choice = strategy === 'random' ? pick(rng, affordable) : (affordable[0] ?? affordable[affordable.length - 1]);
+    return { type: 'eventChoice', playerId: p.id, index: choice?.i ?? options.length - 1 };
+  }
   if (run.phase !== 'doors') return null;
+  if (run.shop) {
+    // At the merchant: heal when hurt, then buy whatever it can afford.
+    if (p.hp < p.maxHp / 2 && run.gold >= SHOP.heal.price)
+      return { type: 'shopService', playerId: p.id, service: 'heal' };
+    const index = run.shop.wares.findIndex((w) => !w.sold && w.price <= run.gold);
+    if (index >= 0) {
+      const ware = run.shop.wares[index]!;
+      const full = ware.option.kind === 'ability' && p.abilities.length > ABILITY_SLOTS;
+      return full
+        ? { type: 'buy', playerId: p.id, index, replace: ABILITY_SLOTS }
+        : { type: 'buy', playerId: p.id, index };
+    }
+  }
   const offer = (altars ? run.doors.find((d) => d.reward === 'altar') : undefined) ?? run.doors[0];
   const door = offer ? state.room.doors[offer.door] : undefined;
   if (!door) return null;
@@ -270,6 +292,11 @@ export function playRun(
     console.log(
       JSON.stringify({
         goal: state.combat.goal,
+        phase: run.phase,
+        kind: run.kind,
+        npc: run.npc,
+        gold: run.gold,
+        doors: run.doors,
         turn: state.combat.turn,
         player: state.players.map((p) => ({ x: p.x, y: p.y, hp: p.hp })),
         enemies: state.enemies.map((e) => ({ t: e.type, x: e.x, y: e.y, hp: e.hp, affix: e.affix })),

@@ -4,7 +4,7 @@ import type { CombatState, DoorOffer, Intent, RewardOption, RoomKind, Side } fro
 /** Movement relative to where the player faces. */
 export type MoveDir = 'forward' | 'back' | 'left' | 'right';
 export type TurnDir = 'left' | 'right';
-export type DebugAction = 'killAll' | 'heal' | 'toggleGod' | 'toBoss' | 'altarNext';
+export type DebugAction = 'killAll' | 'heal' | 'toggleGod' | 'toBoss' | 'altarNext' | 'merchantNext' | 'gold';
 
 /** Serializable intents. Input produces these; only `apply` turns them into state changes. */
 export type Command =
@@ -28,6 +28,19 @@ export type Command =
   | { readonly type: 'debugJump'; readonly playerId: string; readonly act: number; readonly depth: number }
   /** Debug: add a second class (as Initiation would). */
   | { readonly type: 'debugClass'; readonly playerId: string; readonly classId: string }
+  /** Debug: the next doors include this event. */
+  | { readonly type: 'debugEvent'; readonly playerId: string; readonly eventId: string }
+  /** Buy a ware from the merchant (M6c); a new ability with every slot full needs `replace`. */
+  | { readonly type: 'buy'; readonly playerId: string; readonly index: number; readonly replace?: number }
+  /** The merchant's services: heal, take off a cursed item (`itemId`), new wares. */
+  | {
+      readonly type: 'shopService';
+      readonly playerId: string;
+      readonly service: 'heal' | 'uncurse' | 'reroll';
+      readonly itemId?: string;
+    }
+  /** Choose an option of the event in this room (M6c). */
+  | { readonly type: 'eventChoice'; readonly playerId: string; readonly index: number }
   /**
    * Take one of the offered rewards (`index`), or none (null). A new ability with every slot full needs
    * `replace`: the slot (1..4) it takes over.
@@ -51,7 +64,11 @@ export type RejectReason =
   | 'choose_reward'
   | 'no_reward'
   | 'slot_needed'
-  | 'cannot_retreat';
+  | 'cannot_retreat'
+  | 'no_shop'
+  | 'no_gold'
+  | 'no_event'
+  | 'choose_event';
 
 /** What happened, in order, for the renderer and UI to animate. */
 export type GameEvent =
@@ -144,6 +161,28 @@ export type GameEvent =
   /** Walked through a door into the next room (the renderer rebuilds the scene). */
   | { readonly type: 'roomEntered'; readonly depth: number; readonly kind: RoomKind }
   | { readonly type: 'rewardOffered'; readonly options: readonly RewardOption[] }
+  /** Gold for the purse (M6c): `gold` is the new total. */
+  | { readonly type: 'goldGained'; readonly amount: number; readonly gold: number }
+  | { readonly type: 'bought'; readonly option: RewardOption; readonly price: number; readonly gold: number }
+  | {
+      readonly type: 'shopService';
+      readonly service: 'heal' | 'uncurse' | 'reroll';
+      readonly price: number;
+      readonly gold: number;
+    }
+  | {
+      readonly type: 'eventChosen';
+      readonly event: string;
+      readonly option: number;
+      /** Which of the option's outcomes was drawn. */
+      readonly outcome: number;
+      readonly gold: number;
+      readonly hp: number;
+    }
+  /** The next fight started the way an event promised. */
+  | { readonly type: 'nextFightApplied' }
+  /** The hero walked into the merchant or the event's object (the UI opens its screen). */
+  | { readonly type: 'npcBumped'; readonly unitId: string; readonly at: Vec2 }
   | { readonly type: 'rewardTaken'; readonly option: RewardOption | null }
   | { readonly type: 'doorsOpened'; readonly doors: readonly DoorOffer[] }
   | { readonly type: 'runEnded'; readonly result: 'won' | 'lost' }
@@ -153,6 +192,6 @@ export type GameEvent =
   | { readonly type: 'missed'; readonly unitId: string }
   | {
       readonly type: 'debug';
-      readonly action: DebugAction | 'grant' | 'modifier' | 'item' | 'class' | 'gift' | 'jump';
+      readonly action: DebugAction | 'grant' | 'modifier' | 'item' | 'class' | 'gift' | 'jump' | 'event';
     }
   | { readonly type: 'rejected'; readonly reason: RejectReason };

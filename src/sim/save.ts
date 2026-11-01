@@ -84,6 +84,26 @@ const STATE_MIGRATIONS: Record<number, (s: Json) => Json> = {
     players: (s.players as Json[]).map((p) => ({ revives: 0, ...p })),
     run: s.run ? { perks: [], rerolls: 0, restBonus: 0, ...(s.run as Json) } : null,
   }),
+  // v11 → v12 (M6c): gold, the merchant, events.
+  11: (s) => ({
+    ...s,
+    version: 12,
+    run: s.run
+      ? {
+          gold: 0,
+          merchant: false,
+          events: 0,
+          seenEvents: [],
+          shop: null,
+          event: null,
+          npc: null,
+          nextFight: null,
+          forceMerchant: false,
+          forceEvent: null,
+          ...(s.run as Json),
+        }
+      : null,
+  }),
 };
 
 export function migrateState(raw: unknown): GameState | null {
