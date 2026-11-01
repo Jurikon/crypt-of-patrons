@@ -76,6 +76,11 @@ export function Hud({ view, actions, now }: { view: ViewState; actions: HudActio
             {t('hud.incoming', { n: incoming })}
           </div>
         )}
+        {game.run?.npc && !view.npcOpen && (game.run.phase === 'event' || game.run.shop) && (
+          <div class="free-hint" data-testid="npc-hint">
+            {t(game.run.shop ? 'hud.npcMerchant' : 'hud.npcEvent')}
+          </div>
+        )}
         {p.freeActions > 0 && active && (
           <div class="free-hint" data-testid="free-action">
             {t('hud.freeReady')}
@@ -119,6 +124,11 @@ export function Hud({ view, actions, now }: { view: ViewState; actions: HudActio
                 </span>
               </div>
             </div>
+            {game.run && (
+              <div class="hud-gold" data-testid="gold" title={t('hud.gold')}>
+                ¤ {game.run.gold}
+              </div>
+            )}
             {p.statuses.length > 0 && (
               <div class="hud-statuses">
                 {p.statuses.map((st) => (

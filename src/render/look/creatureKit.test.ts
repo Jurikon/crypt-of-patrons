@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ENEMIES, SUMMONS } from '../../content';
+import { ENEMIES, EVENTS, SUMMONS } from '../../content';
 import { CREATURES, PROPS, type CreatureSpec, type PropSpec } from './creatureKit';
 
 const checkParts = (name: string, spec: PropSpec) => {
@@ -35,5 +35,9 @@ describe('creature specs', () => {
   it.each(Object.entries(PROPS))('prop %s is well formed and lies on the body', (name, spec) => {
     checkParts(name, spec);
     for (const p of spec.parts) expect(p.bone).toBe('body');
+  });
+
+  it('every event stands its object in the room', () => {
+    for (const e of EVENTS) expect(PROPS[e.prop], e.id).toBeDefined();
   });
 });

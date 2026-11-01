@@ -166,6 +166,7 @@ const store = createStore<ViewState>({
   hybridNews: null,
   actNews: null,
   patronVoice: null,
+  npcOpen: false,
   meta,
   ashGained: null,
 });
@@ -259,8 +260,14 @@ function run(command: Command, now: number): void {
     // A new room: rebuild the scene at once behind a short fade.
     selected = null;
     renderer.reset(state, now);
-    store.set({ roomAt: now });
+    store.set({ roomAt: now, npcOpen: false });
   } else renderer.play(result.events, state);
+  // Walking into the merchant or an event's object opens its screen; a choice made closes it.
+  if (result.events.some((e) => e.type === 'npcBumped')) {
+    store.set({ npcOpen: true });
+    if (document.pointerLockElement) document.exitPointerLock();
+  }
+  if (result.events.some((e) => e.type === 'eventChosen')) store.set({ npcOpen: false });
   persist();
   const formed = result.events.find((e) => e.type === 'hybridFormed');
   if (formed?.type === 'hybridFormed')
@@ -399,7 +406,25 @@ function chooseReward(index: number | null, replace?: number): void {
   );
 }
 
+function buy(index: number, replace?: number): void {
+  dispatch(
+    replace === undefined
+      ? { type: 'buy', playerId: PLAYER_ID, index }
+      : { type: 'buy', playerId: PLAYER_ID, index, replace },
+  );
+}
+
 const actions: AppActions = {
+  buy,
+  shopService: (service: 'heal' | 'uncurse' | 'reroll', itemId?: string) =>
+    dispatch(
+      itemId === undefined
+        ? { type: 'shopService', playerId: PLAYER_ID, service }
+        : { type: 'shopService', playerId: PLAYER_ID, service, itemId },
+    ),
+  eventChoice: (index: number) => dispatch({ type: 'eventChoice', playerId: PLAYER_ID, index }),
+  closeNpc: () => store.set({ npcOpen: false }),
+  forceEvent: (eventId: string) => dispatch({ type: 'debugEvent', playerId: PLAYER_ID, eventId }),
   newSeed,
   exportState: () => JSON.stringify({ seed, classId, perks: state.run?.perks ?? [], commands }),
   cheat: (action: DebugAction) => dispatch({ type: 'debug', playerId: PLAYER_ID, action }),
@@ -542,4 +567,6 @@ requestAnimationFrame(frame);
   getCommands: () => commands.slice(),
   isBusy: () => renderer.isBusy(performance.now()),
   benchmark: (frames: number) => renderer.benchmark(frames),
+  /** Sends a command as the input would (tests and console debugging). */
+  send: (command: Command) => dispatch(command),
 };

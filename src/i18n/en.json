@@ -522,5 +522,10 @@
   "event.bargainAltar.give": "Give a random ability (not the base attack): two random upgrades to the others",
   "debug.merchantNext": "Next door: merchant",
   "debug.gold": "+50 gold",
-  "debug.eventNext": "Next door: event"
+  "debug.eventNext": "Next door: event",
+  "reject.no_shop": "Nothing to buy here",
+  "reject.no_gold": "Not enough gold (or health)",
+  "reject.no_event": "Nothing to choose here",
+  "reject.choose_event": "Choose first",
+  "shop.healFull": "Health is full"
 }

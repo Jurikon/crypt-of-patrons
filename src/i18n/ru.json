@@ -522,5 +522,10 @@
   "event.bargainAltar.give": "Отдать случайную способность (не базовую): два случайных улучшения остальным",
   "debug.merchantNext": "След. дверь: торговец",
   "debug.gold": "+50 золота",
-  "debug.eventNext": "След. дверь: событие"
+  "debug.eventNext": "След. дверь: событие",
+  "reject.no_shop": "Здесь нечего купить",
+  "reject.no_gold": "Не хватает золота (или здоровья)",
+  "reject.no_event": "Здесь нечего выбирать",
+  "reject.choose_event": "Сначала сделай выбор",
+  "shop.healFull": "Здоровье полное"
 }

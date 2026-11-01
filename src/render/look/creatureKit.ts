@@ -867,4 +867,223 @@ const spikes: PropSpec = {
   ],
 };
 
-export const PROPS: Readonly<Record<string, PropSpec>> = { corpse, trap, spikes };
+// ---------------------------------------------------------------------------------------------------
+// Peaceful rooms (M6c): the merchant and what stands in an event's room. Static, on `body`.
+
+const WOOD = { color: 0x5a3a1e, pattern: 'planks' } as const satisfies MatSpec;
+const STONE = { color: 0x7a7266, spots: 0x4a443a, rough: 0.9 } as const satisfies MatSpec;
+
+/** The merchant: a hunched figure in a patched hood, lantern raised, beside a laden cart. */
+const merchant: PropSpec = {
+  mats: {
+    robe: { color: 0x4a3a2a, spots: 0x2a2014, stripes: true },
+    patch: { color: 0x6a2a20, spots: 0x3a1410 },
+    shadow: { color: 0x050302 },
+    hand: { color: 0xb8a890, spots: 0x7a6a50 },
+    wood: WOOD,
+    iron: { color: 0x3a3634, spots: 0x5a3010, rough: 0.5, metal: 0.3 },
+    lamp: { color: 0xffc060, glow: true },
+    eyes: { color: 0xffd080, glow: true },
+    cloth: { color: 0x2a4a5a, spots: 0x14242a, stripes: true },
+    gold: { color: 0xd8a838, spots: 0x8a6a20, rough: 0.3, metal: 0.6 },
+    pot: { color: 0x8a5a3a, spots: 0x4a2a18 },
+  },
+  parts: [
+    // The figure.
+    cyl('body', [0.17, 1.0, 0.36], [0, 0.5, 0], 'robe'),
+    sph('body', [0.24, 0.22, 0.22], [0, 1.15, -0.06], 'robe'),
+    box('body', [0.12, 0.14, 0.01], [-0.12, 0.6, 0.3], 'patch', [-0.3, 0, 0.2]),
+    sph('body', [0.15, 0.16, 0.15], [0, 1.36, 0.08], 'robe'),
+    cone('body', [0.1, 0.18, 0], [0, 1.52, 0.02], 'robe', [-0.6, 0, 0]),
+    sph('body', [0.1, 0.1, 0.06], [0, 1.33, 0.18], 'shadow'),
+    sph('body', [0.018, 0.018, 0.01], [-0.04, 1.35, 0.235], 'eyes'),
+    sph('body', [0.018, 0.018, 0.01], [0.04, 1.35, 0.235], 'eyes'),
+    // Lantern raised in the right hand.
+    cyl('body', [0.07, 0.5, 0.09], [0.26, 1.2, 0.12], 'robe', [-0.9, 0, -0.3]),
+    box('body', [0.07, 0.08, 0.07], [0.33, 1.38, 0.3], 'hand'),
+    box('body', [0.01, 0.12, 0.01], [0.33, 1.28, 0.3], 'iron'),
+    box('body', [0.14, 0.18, 0.14], [0.33, 1.12, 0.3], 'iron'),
+    box('body', [0.1, 0.13, 0.1], [0.33, 1.12, 0.3], 'lamp'),
+    cone('body', [0.1, 0.08, 0], [0.33, 1.25, 0.3], 'iron'),
+    // The cart: a crate on two wheels, a cloth over the wares, pots and a purse on top.
+    box('body', [0.9, 0.42, 0.6], [-0.75, 0.55, -0.1], 'wood'),
+    cyl('body', [0.26, 0.05, 0.26], [-0.75, 0.26, 0.23], 'wood', [Math.PI / 2, 0, 0]),
+    cyl('body', [0.26, 0.05, 0.26], [-0.75, 0.26, -0.43], 'wood', [Math.PI / 2, 0, 0]),
+    box('body', [0.95, 0.04, 0.66], [-0.75, 0.78, -0.1], 'cloth', [0, 0, 0.05]),
+    box('body', [0.05, 0.05, 0.9], [-0.25, 0.5, 0.25], 'wood', [0, 0.4, 0]),
+    cyl('body', [0.08, 0.2, 0.1], [-0.95, 0.9, -0.2], 'pot'),
+    cyl('body', [0.06, 0.14, 0.08], [-0.75, 0.87, 0.05], 'pot'),
+    sph('body', [0.08, 0.07, 0.08], [-0.55, 0.86, -0.25], 'gold'),
+    box('body', [0.2, 0.08, 0.14], [-0.55, 0.84, 0.05], 'gold'),
+  ],
+};
+
+const well: PropSpec = {
+  mats: { stone: STONE, blood: { color: 0x8a0a08, glow: true }, wood: WOOD, iron: { color: 0x3a3634, metal: 0.3 } },
+  parts: [
+    cyl('body', [0.55, 0.6, 0.6], [0, 0.3, 0], 'stone'),
+    cyl('body', [0.45, 0.02, 0.45], [0, 0.55, 0], 'blood'),
+    box('body', [0.08, 1.2, 0.08], [-0.55, 0.9, 0], 'wood'),
+    box('body', [0.08, 1.2, 0.08], [0.55, 0.9, 0], 'wood'),
+    box('body', [1.3, 0.08, 0.1], [0, 1.5, 0], 'wood'),
+    cyl('body', [0.15, 0.2, 0.12], [0.1, 1.1, 0], 'iron'),
+  ],
+};
+
+const sarcophagusProp: PropSpec = { mats: sarcophagus.mats, parts: sarcophagus.parts };
+
+const dice: PropSpec = {
+  mats: { ...BONE_MATS, wood: WOOD, pip: { color: 0x0a0604 } },
+  parts: [
+    // A coffin lid on two skulls for a table, dice and a bone cup on it.
+    box('body', [1.0, 0.08, 0.55], [0, 0.42, 0], 'wood'),
+    sph('body', [0.18, 0.18, 0.18], [-0.32, 0.18, 0], 'bone'),
+    sph('body', [0.18, 0.18, 0.18], [0.32, 0.18, 0], 'bone'),
+    box('body', [0.08, 0.08, 0.08], [0.1, 0.5, 0.1], 'bone', [0, 0.4, 0]),
+    box('body', [0.08, 0.08, 0.08], [0.22, 0.5, -0.05], 'bone', [0, 1.1, 0]),
+    cyl('body', [0.07, 0.16, 0.05], [-0.2, 0.54, 0], 'boneDark'),
+    // Two skeletons slumped over it.
+    ...skeleton()
+      .filter((p) => p.bone === 'head' || p.bone === 'body')
+      .map((p) => ({ ...p, at: [p.at[0] - 0.75, p.at[1] - 0.6, p.at[2]] as Vec3, bone: 'body' as const })),
+  ],
+};
+
+const pilgrim: PropSpec = {
+  mats: {
+    robe: { color: 0x6a5a40, spots: 0x3a3020, stripes: true },
+    skin: { color: 0xb8987a, spots: 0x7a5a40 },
+    blood: { color: 0x6a0a08 },
+    gold: { color: 0xd8a838, metal: 0.6, rough: 0.3 },
+    wood: WOOD,
+  },
+  parts: [
+    // Sitting against the wall: legs out, head bowed, a staff and a purse.
+    cyl('body', [0.2, 0.55, 0.28], [0, 0.45, -0.2], 'robe', [-0.15, 0, 0]),
+    box('body', [0.3, 0.14, 0.6], [0, 0.1, 0.2], 'robe'),
+    sph('body', [0.12, 0.13, 0.12], [0, 0.82, -0.08], 'skin', [0.4, 0, 0]),
+    sph('body', [0.15, 0.1, 0.15], [0, 0.9, -0.12], 'robe'),
+    box('body', [0.14, 0.04, 0.12], [0.12, 0.5, 0.0], 'blood'),
+    sph('body', [0.07, 0.06, 0.07], [-0.15, 0.32, 0.1], 'gold'),
+    cyl('body', [0.025, 1.4, 0.025], [0.32, 0.6, -0.1], 'wood', [0.2, 0, -0.3]),
+  ],
+};
+
+const mushrooms: PropSpec = {
+  mats: {
+    cap: { color: 0xd8d0b8, spots: 0x8a7a5a },
+    gill: { color: 0x8a9a7a, spots: 0x4a5a3a },
+    glow: { color: 0x7affc0, glow: true },
+  },
+  parts: [
+    ...[
+      [0, 0, 0.32],
+      [0.3, 0.1, 0.2],
+      [-0.25, 0.2, 0.24],
+      [0.1, -0.3, 0.16],
+      [-0.1, 0.35, 0.12],
+      [0.35, -0.25, 0.1],
+    ].flatMap(([x, z, r]) => [
+      cyl('body', [r! * 0.25, r! * 1.6, r! * 0.3], [x!, r! * 0.8, z!], 'gill'),
+      sph('body', [r!, r! * 0.45, r!], [x!, r! * 1.6, z!], 'cap'),
+    ]),
+    ...[
+      [0.2, 0.25],
+      [-0.3, -0.15],
+      [0.05, 0.4],
+    ].map(([x, z]) => sph('body', [0.03, 0.03, 0.03], [x!, 0.04, z!], 'glow')),
+  ],
+};
+
+const mirror: PropSpec = {
+  mats: {
+    frame: { color: 0x8a6a30, spots: 0x4a3410, rough: 0.35, metal: 0.5 },
+    glass: { color: 0x2a1a3a, glow: true },
+  },
+  parts: [
+    box('body', [0.9, 1.7, 0.08], [0, 0.95, 0], 'frame'),
+    box('body', [0.72, 1.5, 0.02], [0, 0.95, 0.045], 'glass'),
+    cone('body', [0.15, 0.25, 0], [0, 1.95, 0], 'frame'),
+    box('body', [1.0, 0.1, 0.4], [0, 0.05, 0], 'frame'),
+  ],
+};
+
+const bell: PropSpec = {
+  mats: {
+    bronze: { color: 0x9a7030, spots: 0x4a5a3a, rough: 0.35, metal: 0.55 },
+    wood: WOOD,
+    crack: { color: 0x0a0604 },
+  },
+  parts: [
+    box('body', [0.12, 2.2, 0.12], [-0.7, 1.1, 0], 'wood'),
+    box('body', [0.12, 2.2, 0.12], [0.7, 1.1, 0], 'wood'),
+    box('body', [1.6, 0.14, 0.16], [0, 2.2, 0], 'wood'),
+    box('body', [0.02, 0.3, 0.02], [0, 2.0, 0], 'wood'),
+    cyl('body', [0.22, 0.6, 0.48], [0, 1.55, 0], 'bronze'),
+    ring('body', [0.48, 0.04, Math.PI * 2], [0, 1.25, 0], 'bronze', [Math.PI / 2, 0, 0]),
+    box('body', [0.02, 0.4, 0.01], [0.15, 1.5, 0.4], 'crack', [0.4, 0, 0.3]),
+  ],
+};
+
+const bargainAltar: PropSpec = {
+  mats: {
+    stone: { color: 0x3a3438, spots: 0x1a1418, rough: 0.9 },
+    blood: { color: 0x6a0a08 },
+    wax: { color: 0xd8d0b0, spots: 0xa89870 },
+    flame: { color: 0xffa040, glow: true },
+    eye: { color: 0xff3020, glow: true },
+  },
+  parts: [
+    box('body', [1.1, 0.8, 0.6], [0, 0.4, 0], 'stone'),
+    box('body', [1.2, 0.08, 0.7], [0, 0.84, 0], 'stone'),
+    box('body', [0.5, 0.01, 0.3], [0, 0.885, 0], 'blood'),
+    // A horned head carved above it, eyes burning.
+    box('body', [0.4, 0.45, 0.2], [0, 1.2, -0.2], 'stone'),
+    cone('body', [0.05, 0.35, 0], [-0.25, 1.5, -0.2], 'stone', [0, 0, 0.6]),
+    cone('body', [0.05, 0.35, 0], [0.25, 1.5, -0.2], 'stone', [0, 0, -0.6]),
+    sph('body', [0.04, 0.04, 0.02], [-0.09, 1.28, -0.09], 'eye'),
+    sph('body', [0.04, 0.04, 0.02], [0.09, 1.28, -0.09], 'eye'),
+    ...[-0.45, 0.45].flatMap((x) => [
+      cyl('body', [0.035, 0.2, 0.04], [x, 0.98, 0.15], 'wax'),
+      cone('body', [0.02, 0.06, 0], [x, 1.11, 0.15], 'flame'),
+    ]),
+  ],
+};
+
+/** A patron's altar (M6c): stone with candles; its sign and light take the patron's colour (render/altarView). */
+const patronAltar: PropSpec = {
+  mats: {
+    stone: { color: 0x6a6258, spots: 0x3a342c, rough: 0.9 },
+    cloth: { color: 0x5a1a1a, spots: 0x2a0808, stripes: true },
+    wax: { color: 0xd8d0b0, spots: 0xa89870 },
+    flame: { color: 0xffb050, glow: true },
+  },
+  parts: [
+    box('body', [1.0, 0.85, 0.55], [0, 0.42, 0], 'stone'),
+    box('body', [1.15, 0.08, 0.68], [0, 0.88, 0], 'stone'),
+    box('body', [0.35, 0.8, 0.01], [0, 0.48, 0.28], 'cloth'),
+    ...[-0.42, -0.3, 0.3, 0.42].flatMap((x, i) => {
+      const h = 0.12 + (i % 2) * 0.1;
+      return [
+        cyl('body', [0.03, h, 0.035], [x, 0.92 + h / 2, 0.12 - (i % 2) * 0.12], 'wax'),
+        cone('body', [0.018, 0.05, 0], [x, 0.95 + h, 0.12 - (i % 2) * 0.12], 'flame'),
+      ];
+    }),
+  ],
+};
+
+export const PROPS: Readonly<Record<string, PropSpec>> = {
+  corpse,
+  trap,
+  spikes,
+  merchant,
+  well,
+  sarcophagusProp,
+  dice,
+  pilgrim,
+  mushrooms,
+  mirror,
+  bell,
+  bargainAltar,
+  patronAltar,
+};

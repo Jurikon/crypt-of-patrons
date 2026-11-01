@@ -57,6 +57,12 @@ export function ResultScreen({
             <th>{t('result.turns')}</th>
             <td>{turns}</td>
           </tr>
+          {game.run && (
+            <tr>
+              <th>{t('result.gold')}</th>
+              <td>{game.run.log.reduce((sum, e) => sum + (e.type === 'gold' ? e.amount : 0), 0)}</td>
+            </tr>
+          )}
           {ash !== null && (
             <tr class="result-ash" data-testid="result-ash">
               <th>{t('result.ash')}</th>

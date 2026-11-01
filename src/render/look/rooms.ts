@@ -8,6 +8,7 @@ import {
   flagstones,
   flameTexture,
   mulberry,
+  pixelTexture,
   planks,
   releaseTexture,
   repeatTexture,
@@ -137,7 +138,15 @@ const SIDES = [
 ] as const;
 
 /** Builds the meshes of a room. `seed` varies the decoration (which faces get niches, torches…). */
-export function buildRoom(grid: Grid, look: RoomLook, seed: number): RoomMeshes {
+/** A carpet laid from a cell in a direction, as far as the floor goes (the cathedral's boss hall). */
+export interface Carpet {
+  readonly x: number;
+  readonly y: number;
+  readonly dx: number;
+  readonly dy: number;
+}
+
+export function buildRoom(grid: Grid, look: RoomLook, seed: number, carpet: Carpet | null = null): RoomMeshes {
   const group = new THREE.Group();
   const ceiling = new THREE.Group();
   group.add(ceiling);
@@ -393,6 +402,25 @@ export function buildRoom(grid: Grid, look: RoomLook, seed: number): RoomMeshes 
       }
   }
 
+  // ---- the cathedral's carpet to the boss (M6c) ----
+  if (carpet) {
+    const red = std(carpetTexture(), 0xffffff, 0.95);
+    let x = carpet.x;
+    let y = carpet.y;
+    while (cell(x, y) === 'floor' || cell(x, y) === 'pit') {
+      if (cell(x, y) === 'floor') {
+        const c = centre(x, y).setY(0.008);
+        const along = carpet.dx !== 0;
+        put(
+          red,
+          quad(along ? CELL : 1.3, along ? 1.3 : CELL, along ? 1 : 1, 1, c, along ? Math.PI / 2 : 0, -Math.PI / 2),
+        );
+      }
+      x += carpet.dx;
+      y += carpet.dy;
+    }
+  }
+
   // ---- things on the floor along the walls (MV2): bones and rubble in the crypt, broken pots in the
   // catacombs, fallen masonry and candles in the cathedral; barrels and crates in corners. Kept low and
   // against the wall, clear of where creatures stand.
@@ -552,4 +580,19 @@ export function buildRoom(grid: Grid, look: RoomLook, seed: number): RoomMeshes 
     disposables.push({ dispose: () => releaseTexture(c) });
     return c;
   }
+}
+
+/** A worn red carpet with a gold border along its length. */
+function carpetTexture() {
+  return pixelTexture(32, 32, 611, (g, r) => {
+    g.fillStyle = '#5a0e10';
+    g.fillRect(0, 0, 32, 32);
+    g.fillStyle = '#c89a30';
+    g.fillRect(2, 0, 1.5, 32);
+    g.fillRect(28.5, 0, 1.5, 32);
+    g.fillStyle = '#3a0608';
+    for (let i = 0; i < 40; i++) g.fillRect(4 + r() * 24, r() * 32, 1 + r() * 2, 0.5);
+    g.fillStyle = '#7a2018';
+    for (let y = 4; y < 32; y += 8) g.fillRect(14, y, 4, 4);
+  });
 }

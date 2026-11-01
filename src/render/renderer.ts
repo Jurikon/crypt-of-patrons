@@ -5,7 +5,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { createRng, fork, nextU32 } from '../core/rng';
-import { getCell, type Vec2 } from '../core/grid';
+import { dirVec, getCell, type Vec2 } from '../core/grid';
 import { MODIFIERS, getAffix, getModifier, getStatus } from '../content';
 import { t, type TextKey } from '../i18n';
 import {
@@ -28,6 +28,7 @@ import { Particles } from './fx';
 import { Highlights, type Highlight } from './highlights';
 import { SurfacesView } from './surfacesView';
 import { AltarView } from './altarView';
+import { NpcView } from './npcView';
 import { DoorsView } from './doorsView';
 import type { RewardKind, RoomGoal } from '../content';
 import { UnitsView, type UnitVisual } from './unitsView';
@@ -206,6 +207,7 @@ export class GameRenderer {
   private readonly surfacesView = new SurfacesView();
   private readonly doorsView = new DoorsView();
   private readonly altarView = new AltarView();
+  private readonly npcView = new NpcView();
   private blasts: { cells: readonly Vec2[]; start: number }[] = [];
   private strikes: { cells: readonly Vec2[]; start: number }[] = [];
   private floaters: FloatingNumber[] = [];
@@ -260,6 +262,7 @@ export class GameRenderer {
       this.surfacesView.group,
       this.doorsView.group,
       this.altarView.group,
+      this.npcView.group,
       this.highlights.group,
       this.fx.group,
     );
@@ -316,7 +319,14 @@ export class GameRenderer {
       fork(createRng(state.seed), act > 1 ? `cave:a${act}:${depth}` : depth === 1 ? 'cave' : `cave:${depth}`),
     );
     const look = roomLook(biomeOf(state).id);
-    this.room = buildRoom(state.room.grid, look, seed);
+    // The cathedral's boss hall: a carpet from the way in to the far end.
+    const spawn = state.room.spawn;
+    const d = dirVec(spawn.dir);
+    const carpet =
+      biomeOf(state).id === 'cathedral' && state.run?.kind === 'boss'
+        ? { x: spawn.x, y: spawn.y, dx: d.x, dy: d.y }
+        : null;
+    this.room = buildRoom(state.room.grid, look, seed, carpet);
     this.grid = state.room.grid;
     this.scene.add(this.room.group);
     this.fog.color.setHex(look.fog);
@@ -407,6 +417,7 @@ export class GameRenderer {
     this.surfacesView.sync(state);
     this.doorsView.sync(state);
     this.altarView.sync(state);
+    this.npcView.sync(state);
     this.hands.setClass(player.classId);
     if (this.rig) this.rig.snap(state.room, player, now);
     else this.rig = new CameraRig(this.camera, state.room, player, now);
@@ -520,6 +531,7 @@ export class GameRenderer {
           this.surfacesView.sync(this.target_);
           this.doorsView.sync(this.target_, now);
           this.altarView.sync(this.target_);
+          this.npcView.sync(this.target_);
         }
         return;
       }
@@ -675,6 +687,7 @@ export class GameRenderer {
         if (this.target_) {
           this.doorsView.sync(this.target_, now);
           this.altarView.sync(this.target_);
+          this.npcView.sync(this.target_);
         }
         return 0;
       case 'surfaceAdded':
@@ -696,6 +709,15 @@ export class GameRenderer {
         return 0;
       case 'chainLimit':
         console.info(`Trigger chain cut at depth ${e.depth}`);
+        return 0;
+      case 'goldGained':
+        this.floater(this.target_?.players[0]?.id ?? null, t('hud.goldGained', { n: e.amount }), 'info', now);
+        return 0;
+      case 'eventChosen':
+        if (this.target_) {
+          this.npcView.sync(this.target_);
+          this.doorsView.sync(this.target_, now);
+        }
         return 0;
       case 'phaseChanged':
         this.enemyPhase = e.phase === 'enemy';
@@ -964,6 +986,7 @@ export class GameRenderer {
     this.surfacesView.dispose();
     this.doorsView.dispose();
     this.altarView.dispose();
+    this.npcView.dispose();
     this.highlights.dispose();
     this.unitsView.clear();
     this.fx.dispose();

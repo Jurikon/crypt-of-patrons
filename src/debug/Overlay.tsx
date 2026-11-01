@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks';
-import { ABILITIES, ABILITY_SLOTS, ACT, CLASSES, GIFTS, ITEMS, MODIFIERS, PATRONS } from '../content';
+import { ABILITIES, ABILITY_SLOTS, ACT, CLASSES, EVENTS, GIFTS, ITEMS, MODIFIERS, PATRONS } from '../content';
 import { abilityName, describeAbility, describeRule } from '../ui/describe';
 import { t, type TextKey } from '../i18n';
 import type { DebugAction } from '../sim';
@@ -26,6 +26,8 @@ export interface OverlayActions {
   jump(act: number, depth: number): void;
   addClass(classId: string): void;
   resetSave(): void;
+  /** The next doors include this event. */
+  forceEvent(eventId: string): void;
 }
 
 /** Debug overlay toggled with the backquote key. */
@@ -89,6 +91,27 @@ export function DebugOverlay({ view, actions }: { view: ViewState; actions: Over
         <button type="button" onClick={() => actions.cheat('altarNext')} data-testid="altar-next">
           {t('debug.altarNext')}
         </button>
+        <button type="button" onClick={() => actions.cheat('merchantNext')} data-testid="merchant-next">
+          {t('debug.merchantNext')}
+        </button>
+        <button type="button" onClick={() => actions.cheat('gold')} data-testid="give-gold">
+          {t('debug.gold')}
+        </button>
+        <select
+          data-testid="event-next"
+          onChange={(e) => {
+            const id = (e.target as HTMLSelectElement).value;
+            if (id) actions.forceEvent(id);
+            (e.target as HTMLSelectElement).value = '';
+          }}
+        >
+          <option value="">{t('debug.eventNext')}</option>
+          {EVENTS.map((ev) => (
+            <option key={ev.id} value={ev.id}>
+              {t(ev.nameKey as TextKey)}
+            </option>
+          ))}
+        </select>
       </div>
       <div class="debug-buttons">
         <button type="button" onClick={actions.toggleStyle} data-testid="style">

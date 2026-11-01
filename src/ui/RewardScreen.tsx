@@ -11,9 +11,9 @@ export interface RewardActions {
   reroll(): void;
 }
 
-type Option = NonNullable<GameState['run']>['offer'][number];
+export type Option = NonNullable<GameState['run']>['offer'][number];
 
-function title(o: Option): string {
+export function title(o: Option): string {
   switch (o.kind) {
     case 'ability':
       return abilityName(getAbility(o.id));
@@ -30,7 +30,7 @@ function title(o: Option): string {
   }
 }
 
-function body(o: Option): string {
+export function body(o: Option): string {
   switch (o.kind) {
     case 'ability':
       return describeAbility(getAbility(o.id));
@@ -61,7 +61,7 @@ export function giftPatrons(id: string): string[] {
 export const cssColor = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
 
 /** A gift card wears its patron's colour and sign; a duo gift is gold and shows both signs. */
-function giftLook(o: Option): { style?: Record<string, string>; signs: string } {
+export function giftLook(o: Option): { style?: Record<string, string>; signs: string } {
   if (o.kind !== 'gift') return { signs: '' };
   const patrons = giftPatrons(o.id).map(getPatron);
   const signs = patrons.map((p) => p.icon).join(' ');
@@ -81,7 +81,7 @@ const HINTS: Record<Option['kind'], TextKey> = {
 };
 
 /** The terms a card mentions, explained (statuses, surfaces). */
-function terms(o: Option): GlossaryEntry[] {
+export function terms(o: Option): GlossaryEntry[] {
   switch (o.kind) {
     case 'ability':
       return glossary(getAbility(o.id));
@@ -102,7 +102,7 @@ function terms(o: Option): GlossaryEntry[] {
  * For a rule that works through tags ("pushes", "summons"): which of your abilities it works with, so
  * "a modifier for pushes" says "works with Shield bash, Crush".
  */
-function worksWith(o: Option, p: GameState['players'][number]): string | null {
+export function worksWith(o: Option, p: GameState['players'][number]): string | null {
   const rule =
     o.kind === 'modifier'
       ? getModifier(o.id)
@@ -120,7 +120,7 @@ function worksWith(o: Option, p: GameState['players'][number]): string | null {
   return names.length ? t('reward.worksWith', { list: names.join(', ') }) : t('reward.worksWithLater');
 }
 
-function Glossary({ entries }: { entries: readonly GlossaryEntry[] }) {
+export function Glossary({ entries }: { entries: readonly GlossaryEntry[] }) {
   if (entries.length === 0) return null;
   return (
     <div class="glossary">
@@ -134,7 +134,7 @@ function Glossary({ entries }: { entries: readonly GlossaryEntry[] }) {
 }
 
 /** Tags shown on ability cards; a cursed item says so. */
-function badges(o: Option): string[] {
+export function badges(o: Option): string[] {
   if (o.kind === 'ability') return getAbility(o.id).tags.map((tag) => t(`tag.${tag}` as TextKey));
   if (o.kind === 'item' && getItem(o.id).cursed) return [t('reward.cursed')];
   if (o.kind === 'gift' && getGift(o.id).patrons) return [t('reward.duo')];

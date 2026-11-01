@@ -1,24 +1,34 @@
 import * as THREE from 'three';
-import { getCell } from '../core/grid';
+import { getCell, type Vec2 } from '../core/grid';
 import { getPatron } from '../content';
 import type { GameState } from '../sim';
 import { CELL } from './dims';
-import { bricks } from './look/textures';
+import { PROPS } from './look/creatureKit';
+import { buildProp } from './look/creatures';
 
-/** The floor cell closest to the middle of the room: where the altar stands. */
-function centreCell(state: GameState): { x: number; y: number } {
-  const { interior, grid } = state.room;
-  const cx = interior.x + (interior.w - 1) / 2;
-  const cy = interior.y + (interior.h - 1) / 2;
-  let best = { x: Math.round(cx), y: Math.round(cy) };
-  let bestD = Infinity;
-  for (let y = interior.y; y < interior.y + interior.h; y++)
-    for (let x = interior.x; x < interior.x + interior.w; x++) {
+/**
+ * Where the altar stands: against the wall farthest from the way in, at the edge of a floor cell, so it
+ * never takes the middle of a cell where the fight happens. Returns the cell and the wall's direction.
+ */
+function altarSpot(state: GameState): { x: number; y: number; wall: Vec2 } {
+  const { grid, spawn } = state.room;
+  let best = { x: spawn.x, y: spawn.y, wall: { x: 0, y: -1 } };
+  let bestD = -1;
+  for (let y = 1; y < grid.h - 1; y++)
+    for (let x = 1; x < grid.w - 1; x++) {
       if (getCell(grid, x, y) !== 'floor') continue;
-      const d = (x - cx) ** 2 + (y - cy) ** 2;
-      if (d < bestD) {
-        bestD = d;
-        best = { x, y };
+      for (const w of [
+        { x: 0, y: -1 },
+        { x: 1, y: 0 },
+        { x: 0, y: 1 },
+        { x: -1, y: 0 },
+      ]) {
+        if (getCell(grid, x + w.x, y + w.y) !== 'wall') continue;
+        const d = (x - spawn.x) ** 2 + (y - spawn.y) ** 2;
+        if (d > bestD) {
+          bestD = d;
+          best = { x, y, wall: w };
+        }
       }
     }
   return best;
@@ -32,25 +42,27 @@ export class AltarView {
   readonly group = new THREE.Group();
   private readonly ring = new THREE.RingGeometry(0.55, 0.78, 40).rotateX(-Math.PI / 2);
   private readonly inner = new THREE.CircleGeometry(0.42, 6).rotateX(-Math.PI / 2);
-  private readonly stone = new THREE.CylinderGeometry(0.22, 0.3, 0.32, 6);
-  private readonly stoneMaterial = new THREE.MeshStandardMaterial({
-    map: bricks(0x6a6258, 0x2a2420, 401),
-    roughness: 0.9,
-  });
+  /** The patron's light: always there (adding lights recompiles shaders), off outside altar rooms. */
+  private readonly light = new THREE.PointLight(0xffffff, 0, 6, 1.3);
+  private materials: THREE.Material[] = [];
   private glow: THREE.MeshBasicMaterial | null = null;
   private lit = false;
   private shownKey = '';
 
+  constructor() {
+    this.group.add(this.light);
+  }
+
   sync(state: GameState): void {
     const patron = state.run?.patron ?? null;
     const lit = state.run?.phase !== 'combat';
-    const key = `${state.seed}:${state.run?.depth}:${patron}`;
+    const key = `${state.seed}:${state.run?.act}:${state.run?.depth}:${patron}`;
     this.lit = lit;
     if (key === this.shownKey) return;
     this.shownKey = key;
     this.clear();
     if (!patron) return;
-    const at = centreCell(state);
+    const spot = altarSpot(state);
     const color = new THREE.Color(getPatron(patron).color);
     this.glow = new THREE.MeshBasicMaterial({
       color: color.clone().multiplyScalar(1.7),
@@ -61,38 +73,47 @@ export class AltarView {
       side: THREE.DoubleSide,
       fog: false,
     });
-    const g = new THREE.Group();
+    const centre = new THREE.Vector3((spot.x + 0.5) * CELL, 0, (spot.y + 0.5) * CELL);
+    // The altar against the wall, facing into the room; the patron's sign glows on its front.
+    const { group: altar, materials } = buildProp('patronAltar', PROPS.patronAltar!);
+    this.materials = materials;
+    altar.traverse((o) => {
+      if (o instanceof THREE.Mesh) o.castShadow = o.receiveShadow = true;
+    });
+    altar.position.copy(centre).add(new THREE.Vector3(spot.wall.x * 0.62, 0, spot.wall.y * 0.62));
+    altar.rotation.y = Math.atan2(-spot.wall.x, -spot.wall.y);
+    const sign = new THREE.Mesh(this.inner, this.glow);
+    sign.rotation.x = Math.PI / 2;
+    sign.scale.setScalar(0.35);
+    sign.position.set(0, 0.5, 0.29);
+    altar.add(sign);
+    // A sigil on the floor in front of it.
     const ring = new THREE.Mesh(this.ring, this.glow);
-    ring.position.y = 0.02;
-    const inner = new THREE.Mesh(this.inner, this.glow);
-    inner.position.y = 0.015;
-    const stone = new THREE.Mesh(this.stone, this.stoneMaterial);
-    stone.position.y = 0.16;
-    const cap = new THREE.Mesh(this.inner, this.glow);
-    cap.scale.setScalar(0.5);
-    cap.position.y = 0.33;
-    g.add(ring, inner, stone, cap);
-    g.position.set((at.x + 0.5) * CELL, 0, (at.y + 0.5) * CELL);
-    this.group.add(g);
+    ring.position.copy(centre).setY(0.02);
+    this.group.add(altar, ring);
+    this.light.color.copy(color);
+    this.light.position.copy(altar.position).add(new THREE.Vector3(-spot.wall.x * 0.6, 1.4, -spot.wall.y * 0.6));
   }
 
   /** Lit: a slow bright pulse; unlit: a faint glow. */
   update(now: number): void {
     if (!this.glow) return;
     this.glow.opacity = this.lit ? 0.7 + 0.25 * Math.sin(now / 260) : 0.18 + 0.05 * Math.sin(now / 600);
+    this.light.intensity = (this.lit ? 2.6 : 0.8) * (0.9 + 0.1 * Math.sin(now / 260));
   }
 
   clear(): void {
-    this.group.clear();
+    for (const c of [...this.group.children]) if (c !== this.light) this.group.remove(c);
     this.glow?.dispose();
     this.glow = null;
+    for (const m of this.materials) m.dispose();
+    this.materials = [];
+    this.light.intensity = 0;
   }
 
   dispose(): void {
     this.clear();
     this.ring.dispose();
     this.inner.dispose();
-    this.stone.dispose();
-    this.stoneMaterial.dispose();
   }
 }

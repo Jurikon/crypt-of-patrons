@@ -3,13 +3,14 @@ import { BIOMES, getPatron } from '../content';
 import { t, type TextKey } from '../i18n';
 import { Hud, type HudActions } from './Hud';
 import { Minimap } from './Minimap';
+import { EventScreen, ShopScreen, type PeacefulActions } from './PeacefulScreens';
 import { ResultScreen, type ResultActions } from './ResultScreen';
 import { cssColor, RewardScreen, type RewardActions } from './RewardScreen';
 import { StartScreen, type StartActions } from './StartScreen';
 import { useStore, type LabelsStore, type Store, type ViewState } from './store';
 import { WorldOverlay } from './WorldOverlay';
 
-export type AppActions = OverlayActions & HudActions & ResultActions & RewardActions & StartActions;
+export type AppActions = OverlayActions & HudActions & ResultActions & RewardActions & StartActions & PeacefulActions;
 
 const HIT_FLASH_MS = 450;
 
@@ -19,6 +20,8 @@ export function App({ store, labels, actions }: { store: Store<ViewState>; label
   const run = view.game.run;
   const over = (run ? run.phase === 'won' || run.phase === 'lost' : view.game.combat.status !== 'active') && !view.busy;
   const choosing = run?.phase === 'reward' && !view.busy;
+  const shopping = view.npcOpen && !!run?.shop && run.phase === 'doors' && !view.busy;
+  const deciding = view.npcOpen && run?.phase === 'event' && !!run.event && !view.busy;
   if (view.screen === 'start')
     return (
       <StartScreen
@@ -54,7 +57,7 @@ export function App({ store, labels, actions }: { store: Store<ViewState>; label
       {view.patronVoice && now - view.patronVoice.at < 3600 && (
         <PatronVoice key={view.patronVoice.at} patron={view.patronVoice.patron} />
       )}
-      {!view.pointerLocked && !over && !choosing && (
+      {!view.pointerLocked && !over && !choosing && !shopping && !deciding && (
         <div class="prompt" data-testid="click-to-play">
           <div class="prompt-title">{t('prompt.clickToPlay')}</div>
           <div class="prompt-controls">{t('prompt.controls')}</div>
@@ -62,6 +65,8 @@ export function App({ store, labels, actions }: { store: Store<ViewState>; label
         </div>
       )}
       {choosing && <RewardScreen game={view.game} actions={actions} />}
+      {shopping && <ShopScreen game={view.game} actions={actions} />}
+      {deciding && <EventScreen game={view.game} actions={actions} />}
       {over && <ResultScreen game={view.game} elapsedMs={view.elapsedMs} ash={view.ashGained} actions={actions} />}
       {view.debugOpen && <DebugOverlay view={view} actions={actions} />}
     </div>

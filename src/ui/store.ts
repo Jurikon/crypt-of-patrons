@@ -43,6 +43,8 @@ export interface ViewState {
   readonly ashGained: number | null;
   /** A new act just began: its number and when, for the title card. */
   readonly actNews: { readonly act: number; readonly at: number } | null;
+  /** The merchant's shop or the event's choice is open (the hero walked into them). */
+  readonly npcOpen: boolean;
   /** A gift was just taken: its patron speaks a line. */
   readonly patronVoice: { readonly patron: string; readonly at: number } | null;
 }
