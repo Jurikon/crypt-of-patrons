@@ -1,23 +1,25 @@
 import * as THREE from 'three';
 
 /**
- * Style test (owner request): one room in a retro PS1 / King's Field look, to judge the direction
- * before the game is restyled. Not part of the game: low-poly shapes, pixel textures drawn in code,
- * a low-resolution render with snapped vertices and dithering, torches in the dark, the hero's hands.
+ * Style test (owner request): the retro PS1 / King's Field direction, before the game is restyled.
+ * Not part of the game. Each biome is its own place, not a retexture: a low burial crypt with niches
+ * and sarcophagi, a vaulted catacomb tunnel with a water channel and a bridge, a tall cathedral nave
+ * with colonnades, stained glass and an altar, and three creatures of its own each.
  *
- *   ?biome=crypt|catacombs|cathedral   ?view=1|2|3   ?still=1 (no swaying, for screenshots)
+ *   ?biome=crypt|catacombs|cathedral   ?px=480 (render height)   ?still=1 (no sway, for screenshots)
  */
 
 type Biome = 'crypt' | 'catacombs' | 'cathedral';
 const params = new URLSearchParams(location.search);
 let biome = (params.get('biome') as Biome | null) ?? 'crypt';
-const view = Number(params.get('view') ?? 1);
 const still = params.has('still');
 
-/** Low internal resolution: every texel and pixel stays chunky. */
-const LOW_H = 240;
+/** Internal render height: higher = finer pixels. */
+const LOW_H = Number(params.get('px') ?? 480);
+/** Texture detail: texels per brick edge and so on. */
+const TEX = 2;
 
-// ---- seeded noise ------------------------------------------------------------------------------
+// ---- seeded noise and pixel textures -----------------------------------------------------------
 
 function mulberry(seed: number) {
   let a = seed >>> 0;
@@ -35,7 +37,7 @@ const hex = (c: number): Rgb => [(c >> 16) & 255, (c >> 8) & 255, c & 255];
 const shade = (c: Rgb, k: number): string =>
   `rgb(${Math.max(0, Math.min(255, c[0] * k))},${Math.max(0, Math.min(255, c[1] * k))},${Math.max(0, Math.min(255, c[2] * k))})`;
 
-/** A pixel texture drawn on a small canvas: nearest filtering, no mipmaps, tiles. */
+/** A pixel texture drawn on a small canvas (in units of 1/TEX texel): nearest filtering, tiles. */
 function pixelTexture(
   w: number,
   h: number,
@@ -43,10 +45,12 @@ function pixelTexture(
   draw: (g: CanvasRenderingContext2D, r: () => number) => void,
 ) {
   const c = document.createElement('canvas');
-  c.width = w;
-  c.height = h;
+  c.width = w * TEX;
+  c.height = h * TEX;
   const g = c.getContext('2d')!;
+  g.scale(TEX, TEX);
   draw(g, mulberry(seed));
+  grain(g, c.width, c.height, mulberry(seed + 99), 0.22);
   const t = new THREE.CanvasTexture(c);
   t.magFilter = THREE.NearestFilter;
   t.minFilter = THREE.NearestFilter;
@@ -56,17 +60,23 @@ function pixelTexture(
   return t;
 }
 
-/** Per-pixel grain over whatever is drawn. */
+/** Per-texel grain over whatever is drawn. */
 function grain(g: CanvasRenderingContext2D, w: number, h: number, r: () => number, amount: number) {
+  g.save();
+  g.setTransform(1, 0, 0, 1, 0, 0);
   const img = g.getImageData(0, 0, w, h);
   for (let i = 0; i < img.data.length; i += 4) {
+    if (img.data[i + 3] === 0) continue;
     const k = 1 + (r() - 0.5) * amount;
     img.data[i] = img.data[i]! * k;
     img.data[i + 1] = img.data[i + 1]! * k;
     img.data[i + 2] = img.data[i + 2]! * k;
   }
   g.putImageData(img, 0, 0);
+  g.restore();
 }
+
+const dot = (g: CanvasRenderingContext2D, x: number, y: number, w = 0.5, h = 0.5) => g.fillRect(x, y, w, h);
 
 function bricks(base: number, mortar: number, seed: number, moss = 0, wet = false) {
   return pixelTexture(64, 64, seed, (g, r) => {
@@ -77,58 +87,58 @@ function bricks(base: number, mortar: number, seed: number, moss = 0, wet = fals
       const off = row % 2 ? 8 : 0;
       for (let col = -1; col < 4; col++) {
         const x = col * 16 + off;
-        g.fillStyle = shade(b, 0.75 + r() * 0.45);
-        g.fillRect(x + 1, row * 8 + 1, 15, 7);
-        // Chipped corners and a lighter top edge.
-        g.fillStyle = shade(b, 1.25);
-        g.fillRect(x + 1, row * 8 + 1, 15, 1);
-        if (r() < 0.3) {
-          g.fillStyle = shade(hex(mortar), 1);
-          g.fillRect(x + 1 + Math.floor(r() * 13), row * 8 + 1 + Math.floor(r() * 5), 2, 2);
+        const k = 0.75 + r() * 0.45;
+        g.fillStyle = shade(b, k);
+        g.fillRect(x + 0.5, row * 8 + 0.5, 15.5, 7.5);
+        g.fillStyle = shade(b, k * 1.22);
+        g.fillRect(x + 0.5, row * 8 + 0.5, 15.5, 0.5);
+        g.fillStyle = shade(b, k * 0.78);
+        g.fillRect(x + 0.5, row * 8 + 7.5, 15.5, 0.5);
+        for (let i = 0; i < 5; i++) {
+          g.fillStyle = shade(b, k * (0.85 + r() * 0.3));
+          dot(g, x + 1 + r() * 14, row * 8 + 1 + r() * 6, 1 + r() * 2, 0.5);
         }
       }
     }
-    // Cracks.
     g.fillStyle = shade(hex(mortar), 0.8);
-    for (let i = 0; i < 4; i++) {
-      let x = Math.floor(r() * 64);
-      let y = Math.floor(r() * 64);
-      for (let s = 0; s < 6; s++) {
-        g.fillRect(x, y, 1, 1);
-        x += Math.floor(r() * 3) - 1;
-        y += 1;
+    for (let i = 0; i < 5; i++) {
+      let x = r() * 64;
+      let y = r() * 64;
+      for (let s = 0; s < 12; s++) {
+        dot(g, x, y);
+        x += (r() - 0.5) * 1.5;
+        y += 0.5;
       }
     }
-    if (moss) {
-      for (let i = 0; i < 260 * moss; i++) {
-        const y = 40 + Math.floor(r() * r() * 24);
-        g.fillStyle = shade([70, 110, 50], 0.6 + r() * 0.6);
-        g.fillRect(Math.floor(r() * 64), y, 1 + Math.floor(r() * 2), 1);
+    if (moss)
+      for (let i = 0; i < 600 * moss; i++) {
+        g.fillStyle = shade([70, 112, 48], 0.5 + r() * 0.7);
+        dot(g, r() * 64, 36 + r() * r() * 28, 0.5 + r(), 0.5);
       }
-    }
-    if (wet) {
-      for (let i = 0; i < 10; i++) {
-        const x = Math.floor(r() * 64);
-        g.fillStyle = 'rgba(20,40,40,0.35)';
-        g.fillRect(x, 0, 1, 20 + Math.floor(r() * 44));
+    if (wet)
+      for (let i = 0; i < 14; i++) {
+        g.fillStyle = 'rgba(18,40,40,0.35)';
+        g.fillRect(r() * 64, 0, 0.5, 16 + r() * 48);
       }
-    }
-    grain(g, 64, 64, r, 0.25);
   });
 }
 
 function flagstones(base: number, seed: number) {
   return pixelTexture(64, 64, seed, (g, r) => {
     const b = hex(base);
-    g.fillStyle = shade(b, 0.35);
+    g.fillStyle = shade(b, 0.32);
     g.fillRect(0, 0, 64, 64);
     for (let y = 0; y < 64; y += 16)
       for (let x = 0; x < 64; x += 16) {
-        const w = r() < 0.3 ? 31 : 15;
-        g.fillStyle = shade(b, 0.7 + r() * 0.5);
-        g.fillRect(x + 1, y + 1, Math.min(w, 63 - x), 15);
+        const w = r() < 0.3 ? 31.5 : 15.5;
+        const k = 0.7 + r() * 0.45;
+        g.fillStyle = shade(b, k);
+        g.fillRect(x + 0.5, y + 0.5, Math.min(w, 63.5 - x), 15.5);
+        for (let i = 0; i < 8; i++) {
+          g.fillStyle = shade(b, k * (0.8 + r() * 0.35));
+          dot(g, x + 1 + r() * 13, y + 1 + r() * 13, 1 + r() * 2, 0.5 + r());
+        }
       }
-    grain(g, 64, 64, r, 0.35);
   });
 }
 
@@ -139,12 +149,10 @@ function checker(light: number, dark: number, seed: number) {
         g.fillStyle = shade(hex((x + y) % 2 ? dark : light), 1);
         g.fillRect(x * 16, y * 16, 16, 16);
       }
-    // Marble veins and grime.
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 70; i++) {
       g.fillStyle = r() < 0.5 ? 'rgba(0,0,0,0.12)' : 'rgba(255,255,255,0.08)';
-      g.fillRect(Math.floor(r() * 32), Math.floor(r() * 32), 1 + Math.floor(r() * 3), 1);
+      dot(g, r() * 32, r() * 32, 0.5 + r() * 2, 0.5);
     }
-    grain(g, 32, 32, r, 0.2);
   });
 }
 
@@ -155,64 +163,111 @@ function planks(base: number, seed: number) {
       g.fillStyle = shade(b, 0.8 + r() * 0.35);
       g.fillRect(x, 0, 8, 32);
       g.fillStyle = shade(b, 0.5);
-      g.fillRect(x, 0, 1, 32);
-      for (let i = 0; i < 6; i++) {
-        g.fillStyle = shade(b, 0.65);
-        g.fillRect(x + 2 + Math.floor(r() * 5), Math.floor(r() * 32), 1, 3 + Math.floor(r() * 6));
+      g.fillRect(x, 0, 0.5, 32);
+      for (let i = 0; i < 10; i++) {
+        g.fillStyle = shade(b, 0.62 + r() * 0.2);
+        g.fillRect(x + 1 + r() * 6, r() * 32, 0.5, 2 + r() * 8);
       }
     }
-    grain(g, 32, 32, r, 0.2);
   });
 }
 
-function solid(base: number, seed: number, amount = 0.3, spots: number | null = null) {
+/** A flat material colour with grain and a few spots of another colour (bone, skin, cloth, metal). */
+function solid(base: number, seed: number, spots: number | null = null, stripes = false) {
   return pixelTexture(16, 16, seed, (g, r) => {
     g.fillStyle = shade(hex(base), 1);
     g.fillRect(0, 0, 16, 16);
-    if (spots !== null)
-      for (let i = 0; i < 6; i++) {
-        g.fillStyle = shade(hex(spots), 0.8 + r() * 0.4);
-        g.fillRect(Math.floor(r() * 16), Math.floor(r() * 16), 1 + Math.floor(r() * 2), 1);
+    if (stripes)
+      for (let y = 0; y < 16; y += 3) {
+        g.fillStyle = shade(hex(base), 0.8);
+        g.fillRect(0, y, 16, 0.5);
       }
-    grain(g, 16, 16, r, amount);
+    if (spots !== null)
+      for (let i = 0; i < 10; i++) {
+        g.fillStyle = shade(hex(spots), 0.8 + r() * 0.4);
+        dot(g, r() * 16, r() * 16, 0.5 + r(), 0.5 + r() * 0.5);
+      }
   });
 }
 
-function skullFace(seed: number) {
-  return pixelTexture(16, 16, seed, (g, r) => {
-    g.fillStyle = '#d8ccae';
+/** A face on the front of a head box: eyes, nose, mouth, in a few styles. */
+function face(skin: number, kind: 'skull' | 'ghoul' | 'drowned' | 'helm' | 'mask' | 'hood', seed: number) {
+  return pixelTexture(16, 16, seed, (g) => {
+    g.fillStyle = shade(hex(skin), 1);
     g.fillRect(0, 0, 16, 16);
-    g.fillStyle = '#140c08';
-    g.fillRect(3, 5, 4, 4);
-    g.fillRect(9, 5, 4, 4);
-    g.fillRect(7, 10, 2, 2);
-    for (let x = 4; x < 12; x += 2) g.fillRect(x, 13, 1, 2);
-    g.fillStyle = '#ffcc40';
-    g.fillRect(4, 6, 2, 2);
-    g.fillRect(10, 6, 2, 2);
-    grain(g, 16, 16, r, 0.25);
+    const black = '#100806';
+    if (kind === 'skull') {
+      g.fillStyle = black;
+      g.fillRect(3, 5, 4, 4);
+      g.fillRect(9, 5, 4, 4);
+      g.fillRect(7, 10, 2, 2);
+      for (let x = 4; x < 12; x += 2) g.fillRect(x, 13, 1, 2);
+      g.fillStyle = '#ffcc40';
+      g.fillRect(4.5, 6.5, 1, 1);
+      g.fillRect(10.5, 6.5, 1, 1);
+    } else if (kind === 'ghoul') {
+      g.fillStyle = black;
+      g.fillRect(3, 6, 4, 2);
+      g.fillRect(9, 6, 4, 2);
+      g.fillStyle = '#e0ff60';
+      g.fillRect(4, 6.5, 1.5, 1);
+      g.fillRect(10.5, 6.5, 1.5, 1);
+      g.fillStyle = '#2a0808';
+      g.fillRect(3, 11, 10, 3);
+      g.fillStyle = '#e8e0c0';
+      for (let x = 3.5; x < 13; x += 1.5) g.fillRect(x, 11, 0.8, 1.2);
+    } else if (kind === 'drowned') {
+      g.fillStyle = '#0c1c20';
+      g.fillRect(4, 6, 3, 3);
+      g.fillRect(9, 6, 3, 3);
+      g.fillStyle = '#c0f0ff';
+      g.fillRect(5, 7, 1, 1);
+      g.fillRect(10, 7, 1, 1);
+      g.fillStyle = '#0c1c20';
+      g.fillRect(6, 12, 4, 2.5);
+    } else if (kind === 'helm') {
+      g.fillStyle = black;
+      g.fillRect(2, 6, 12, 1.5);
+      g.fillRect(7.25, 7.5, 1.5, 5);
+      g.fillStyle = '#d8b040';
+      g.fillRect(7.5, 1, 1, 5);
+      for (let y = 10; y < 15; y += 1.5) for (let x = 3; x < 13; x += 2) g.fillRect(x, y, 0.6, 0.6);
+    } else if (kind === 'mask') {
+      g.fillStyle = '#e8c050';
+      g.fillRect(2, 2, 12, 12);
+      g.fillStyle = black;
+      g.fillRect(4, 6, 3, 1);
+      g.fillRect(9, 6, 3, 1);
+      g.fillRect(7, 11, 2, 0.6);
+    } else {
+      g.fillStyle = '#0a0606';
+      g.fillRect(3, 3, 10, 11);
+      g.fillStyle = '#ff5030';
+      g.fillRect(5, 7, 1, 1);
+      g.fillRect(10, 7, 1, 1);
+    }
   });
 }
 
 /** A small pixel flame, redrawn every few frames. */
-function flameTexture() {
+function flameTexture(seed: number, hot = '#fff3a0', mid = '#ffb030', cool = '#e0501a') {
   const c = document.createElement('canvas');
-  c.width = 8;
-  c.height = 16;
+  c.width = 16;
+  c.height = 32;
   const g = c.getContext('2d')!;
   const t = new THREE.CanvasTexture(c);
   t.magFilter = t.minFilter = THREE.NearestFilter;
   t.generateMipmaps = false;
   t.colorSpace = THREE.SRGBColorSpace;
-  const r = mulberry(7);
+  const r = mulberry(seed);
   const redraw = () => {
-    g.clearRect(0, 0, 8, 16);
-    for (let y = 0; y < 16; y++) {
-      const width = Math.max(0, Math.round((y / 16) * 4 + (r() - 0.5) * 2));
-      for (let x = 4 - width; x < 4 + width; x++) {
-        const hot = y > 10 && Math.abs(x - 3.5) < 1.5;
-        g.fillStyle = hot ? '#fff3a0' : y > 6 ? '#ffb030' : '#e0501a';
-        if (r() < 0.9) g.fillRect(x, 15 - (15 - y), 1, 1);
+    g.clearRect(0, 0, 16, 32);
+    for (let y = 0; y < 32; y++) {
+      const width = Math.max(0, Math.round((y / 32) * 7 + (r() - 0.5) * 3));
+      for (let x = 8 - width; x < 8 + width; x++) {
+        const centre = Math.abs(x - 7.5) < 2;
+        g.fillStyle = centre && y > 20 ? hot : y > 12 ? mid : cool;
+        if (r() < 0.92) g.fillRect(x, y, 1, 1);
       }
     }
     t.needsUpdate = true;
@@ -224,7 +279,7 @@ function flameTexture() {
 // ---- PS1 look: snapped vertices -----------------------------------------------------------------
 
 const snapRes = new THREE.Vector2(320, 180);
-/** Lambert material whose vertices snap to a coarse screen grid, like the PS1's integer rasteriser. */
+/** Lambert material whose vertices snap to a screen grid, like the PS1's integer rasteriser. */
 function mat(map: THREE.Texture, extra: THREE.MeshLambertMaterialParameters = {}) {
   const m = new THREE.MeshLambertMaterial({ map, ...extra });
   m.onBeforeCompile = (shader) => {
@@ -245,18 +300,18 @@ const repeat = (t: THREE.Texture, x: number, y: number) => {
   return c;
 };
 
-// ---- scene --------------------------------------------------------------------------------------
+// ---- renderer and post pass ---------------------------------------------------------------------
 
 const canvas = document.createElement('canvas');
 document.body.prepend(canvas);
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
 renderer.setPixelRatio(1);
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(66, 16 / 9, 0.05, 60);
+const camera = new THREE.PerspectiveCamera(68, 16 / 9, 0.05, 80);
 scene.add(camera);
 const target = new THREE.WebGLRenderTarget(4, 4, { magFilter: THREE.NearestFilter, minFilter: THREE.NearestFilter });
 
-// Final pass: dither and quantise to 15-bit colour, as the PS1 did.
+// Final pass: light dithering and 15-bit colour, as the PS1 did.
 const post = new THREE.Mesh(
   new THREE.PlaneGeometry(2, 2),
   new THREE.ShaderMaterial({
@@ -270,7 +325,7 @@ const post = new THREE.Mesh(
         vec2 px = floor(vUv * uRes);
         vec3 c = texture2D(tScene, (px + 0.5) / uRes).rgb;
         c = pow(c, vec3(1.0/2.2));
-        c = floor(c * 31.0 + bayer(px) + 0.5) / 31.0;
+        c = floor(c * 31.0 + bayer(px) * 0.7 + 0.5) / 31.0;
         gl_FragColor = vec4(c, 1.0);
       }`,
     depthTest: false,
@@ -280,256 +335,82 @@ const postScene = new THREE.Scene();
 postScene.add(post);
 const postCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 
-const CELL = 2.4;
-const N = 7;
-const SIZE = N * CELL;
-const H = 4.6;
+// ---- shared building blocks ----------------------------------------------------------------------
 
-interface Look {
-  fog: number;
-  ambient: number;
-  wall: THREE.Texture;
-  floor: THREE.Texture;
-  floorRepeat: number;
-  ceiling: THREE.Texture;
-  torch: number;
-}
-
-function lookFor(b: Biome): Look {
-  if (b === 'catacombs')
-    return {
-      fog: 0x0a1410,
-      ambient: 0x203a34,
-      wall: bricks(0x56665a, 0x1c2420, 11, 1, true),
-      floor: flagstones(0x4a5a52, 12),
-      floorRepeat: N,
-      ceiling: bricks(0x3a4a40, 0x141c18, 13, 0.4),
-      torch: 0xffb070,
-    };
-  if (b === 'cathedral')
-    return {
-      fog: 0x1a140e,
-      ambient: 0x4a4038,
-      wall: bricks(0xb8ac94, 0x5a5040, 21),
-      floor: checker(0xd8d0c0, 0x1e1a18, 22),
-      floorRepeat: N,
-      ceiling: bricks(0x8a806c, 0x3a3428, 23),
-      torch: 0xffd890,
-    };
-  return {
-    fog: 0x0c0806,
-    ambient: 0x4a3828,
-    wall: bricks(0x86735e, 0x2a2018, 1),
-    floor: flagstones(0x76685a, 2),
-    floorRepeat: N,
-    ceiling: bricks(0x4a4238, 0x1a1612, 3),
-    torch: 0xffa850,
-  };
-}
-
-const room = new THREE.Group();
-scene.add(room);
+const world = new THREE.Group();
+scene.add(world);
 const lights: { light: THREE.PointLight; base: number; phase: number }[] = [];
 const flames: { redraw: () => void }[] = [];
-const monsters: { root: THREE.Group; arm: THREE.Object3D; phase: number; bar: THREE.Object3D }[] = [];
+const creatures: {
+  root: THREE.Group;
+  arm: THREE.Object3D;
+  phase: number;
+  bar: THREE.Object3D;
+  idle: (t: number) => void;
+}[] = [];
 
-/** A wall with an arched doorway, extruded so its bricks tile in world units. */
-function archWall(width: number, look: Look) {
-  const s = new THREE.Shape();
-  s.moveTo(-width / 2, 0)
-    .lineTo(width / 2, 0)
-    .lineTo(width / 2, H)
-    .lineTo(-width / 2, H)
-    .lineTo(-width / 2, 0);
-  const hole = new THREE.Path();
-  const dw = 1.1;
-  hole.moveTo(-dw, 0).lineTo(dw, 0).lineTo(dw, 2.4).absarc(0, 2.4, dw, 0, Math.PI, false).lineTo(-dw, 0);
-  s.holes.push(hole);
-  const geo = new THREE.ExtrudeGeometry(s, { depth: 0.6, bevelEnabled: false, curveSegments: 6 });
-  const t = repeat(look.wall, 1 / 1.4, 1 / 1.4);
-  return new THREE.Mesh(geo, mat(t));
-}
-
-function torch(look: Look, x: number, z: number, rotY: number) {
-  const g = new THREE.Group();
-  const iron = mat(solid(0x2a2624, 31, 0.4));
-  const bracket = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.4), iron);
-  bracket.position.set(0, 0, 0.2);
-  const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.04, 0.5, 5), mat(planks(0x5a3a1e, 32)));
-  stick.position.set(0, 0.2, 0.38);
-  stick.rotation.x = 0.35;
-  const flame = flameTexture();
-  flames.push(flame);
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: flame.texture, color: 0xffffff, fog: false }));
-  sprite.scale.set(0.32, 0.64, 1);
-  sprite.position.set(0, 0.7, 0.5);
-  g.add(bracket, stick, sprite);
-  g.position.set(x, 2.4, z);
-  g.rotation.y = rotY;
-  room.add(g);
-  const light = new THREE.PointLight(look.torch, 9, 9, 1.6);
-  light.position.set(x + Math.sin(rotY) * 0.7, 3.0, z + Math.cos(rotY) * 0.7);
-  room.add(light);
-  lights.push({ light, base: 9, phase: x * 1.7 + z });
-}
-
-function buildRoom(b: Biome) {
-  room.clear();
-  lights.length = 0;
-  flames.length = 0;
-  monsters.length = 0;
-  const look = lookFor(b);
-  scene.fog = new THREE.Fog(look.fog, 3, 19);
-  scene.background = new THREE.Color(look.fog);
-  room.add(new THREE.AmbientLight(look.ambient, 1.2));
-  room.add(new THREE.HemisphereLight(look.ambient, 0x000000, 0.6));
-
-  const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(SIZE, SIZE).rotateX(-Math.PI / 2),
-    mat(repeat(look.floor, look.floorRepeat, look.floorRepeat)),
-  );
-  room.add(floor);
-  const ceil = new THREE.Mesh(
-    new THREE.PlaneGeometry(SIZE, SIZE).rotateX(Math.PI / 2),
-    mat(repeat(look.ceiling, N / 1.4, N / 1.4)),
-  );
-  ceil.position.y = H;
-  room.add(ceil);
-  for (let i = 0; i < 4; i++) {
-    const w = archWall(SIZE, look);
-    const a = (i * Math.PI) / 2;
-    const g = new THREE.Group();
-    g.add(w);
-    w.position.set(0, 0, -SIZE / 2 - 0.6);
-    g.rotation.y = a;
-    room.add(g);
-    // Torches either side of each doorway.
-    for (const sx of [-1, 1]) {
-      const x = sx * 2.4;
-      const p = new THREE.Vector3(x, 0, -SIZE / 2 + 0.02).applyAxisAngle(new THREE.Vector3(0, 1, 0), a);
-      torch(look, p.x, p.z, a);
-    }
-  }
-  // Ceiling beams.
-  const wood = mat(planks(0x4a2e18, 41));
-  for (let i = -2; i <= 2; i++) {
-    const beam = new THREE.Mesh(new THREE.BoxGeometry(SIZE, 0.3, 0.3), wood);
-    beam.position.set(0, H - 0.15, i * CELL * 1.2);
-    room.add(beam);
-  }
-  // Pillars.
-  const pillarMat = mat(repeat(look.wall, 2, 3));
-  for (const [x, z] of [
-    [-1.5, -1.5],
-    [1.5, -1.5],
-    [-1.5, 1.5],
-    [1.5, 1.5],
-  ] as const) {
-    const p = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.5, H, 8), pillarMat);
-    p.position.set(x * CELL, H / 2, z * CELL);
-    room.add(p);
-  }
-  // A hanging brazier over the middle of the room lights the fight.
-  const glow = new THREE.PointLight(look.torch, 7, 10, 1.4);
-  glow.position.set(0, 3.4, 1.5);
-  room.add(glow);
-  lights.push({ light: glow, base: 7, phase: 0.4 });
-  props(b);
-  if (b === 'cathedral') window_();
-  if (b === 'catacombs') water();
-  enemies(b);
-}
-
-function props(b: Biome) {
-  const r = mulberry(b.length * 31);
-  const wood = mat(planks(0x7a3a1c, 51));
-  // Broken benches and planks scattered on the floor.
-  for (let i = 0; i < 16; i++) {
-    const plank = new THREE.Mesh(new THREE.BoxGeometry(0.9 + r() * 0.8, 0.08, 0.28), wood);
-    plank.position.set((r() - 0.5) * SIZE * 0.8, 0.05 + r() * 0.15, (r() - 0.5) * SIZE * 0.8 - 1);
-    plank.rotation.set((r() - 0.5) * 0.6, r() * Math.PI, (r() - 0.5) * 0.4);
-    room.add(plank);
-  }
-  for (let i = 0; i < 4; i++) {
-    const crate = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.6, 0.8), wood);
-    crate.position.set((r() - 0.5) * SIZE * 0.7, 0.3, (r() - 0.5) * SIZE * 0.7 - 1.5);
-    crate.rotation.set(0, r() * Math.PI, r() < 0.4 ? 0.9 : 0);
-    room.add(crate);
-  }
-  const barrelMat = mat(planks(0x6a4424, 52));
-  for (let i = 0; i < 3; i++) {
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.9, 8), barrelMat);
-    barrel.position.set(-SIZE / 2 + 1 + i * 0.75, 0.45, -SIZE / 2 + 1);
-    room.add(barrel);
-  }
-  if (b !== 'cathedral') {
-    const bone = mat(solid(0xd8ccae, 53, 0.3));
-    for (let i = 0; i < 10; i++) {
-      const piece = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.06, 0.06), bone);
-      piece.position.set((r() - 0.5) * SIZE * 0.8, 0.03, (r() - 0.5) * SIZE * 0.8);
-      piece.rotation.y = r() * Math.PI;
-      room.add(piece);
-    }
-  }
-}
-
-/** A stained-glass window on the far wall, glowing. */
-function window_() {
-  const t = pixelTexture(16, 32, 61, (g, r) => {
-    const colors = ['#c02030', '#2040c0', '#e0b020', '#20a050', '#8030b0'];
-    for (let y = 0; y < 32; y += 4)
-      for (let x = 0; x < 16; x += 4) {
-        g.fillStyle = colors[Math.floor(r() * colors.length)]!;
-        g.fillRect(x, y, 4, 4);
-      }
-    g.fillStyle = '#100a08';
-    for (let i = 0; i <= 16; i += 4) g.fillRect(i, 0, 1, 32);
-    for (let i = 0; i <= 32; i += 4) g.fillRect(0, i, 16, 1);
-  });
-  for (const x of [-4.6, 4.6]) {
-    const w = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 2.4), new THREE.MeshBasicMaterial({ map: t, fog: false }));
-    w.position.set(x, 3, -SIZE / 2 - 0.05);
-    room.add(w);
-    const light = new THREE.SpotLight(0xa070ff, 14, 14, 0.5, 0.6, 1.2);
-    light.position.set(x, 3.2, -SIZE / 2 + 0.2);
-    light.target.position.set(x * 0.5, 0, -2);
-    room.add(light, light.target);
-  }
-}
-
-function water() {
-  const t = pixelTexture(32, 32, 71, (g, r) => {
-    g.fillStyle = '#163c44';
-    g.fillRect(0, 0, 32, 32);
-    for (let i = 0; i < 30; i++) {
-      g.fillStyle = r() < 0.5 ? '#2a6a70' : '#0e2a30';
-      g.fillRect(Math.floor(r() * 32), Math.floor(r() * 32), 2 + Math.floor(r() * 4), 1);
-    }
-  });
-  const puddle = new THREE.Mesh(
-    new THREE.PlaneGeometry(CELL * 3, CELL * 2).rotateX(-Math.PI / 2),
-    new THREE.MeshLambertMaterial({ map: repeat(t, 3, 2), transparent: true, opacity: 0.85 }),
-  );
-  puddle.position.set(CELL, 0.02, 0);
-  room.add(puddle);
-}
-
-// ---- creatures: low-poly boxes with pixel textures --------------------------------------------
-
-function box(w: number, h: number, d: number, m: THREE.Material, x = 0, y = 0, z = 0) {
+function box(w: number, h: number, d: number, m: THREE.Material | THREE.Material[], x = 0, y = 0, z = 0) {
   const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
   b.position.set(x, y, z);
   return b;
+}
+const add = (o: THREE.Object3D, x: number, y: number, z: number, ry = 0) => {
+  o.position.set(x, y, z);
+  o.rotation.y = ry;
+  world.add(o);
+  return o;
+};
+
+/** A flat floor or wall panel whose texture tiles in world units (`unit` metres per tile). */
+function panel(w: number, h: number, t: THREE.Texture, unit: number) {
+  return new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat(repeat(t, w / unit, h / unit), { side: THREE.DoubleSide }));
+}
+
+function lightAt(color: number, intensity: number, distance: number, x: number, y: number, z: number) {
+  const light = new THREE.PointLight(color, intensity, distance, 1.5);
+  light.position.set(x, y, z);
+  world.add(light);
+  lights.push({ light, base: intensity, phase: x * 1.7 + z * 0.9 });
+}
+
+/** A torch on a wall bracket: iron, a stick, a living pixel flame and its warm light. */
+function torch(x: number, y: number, z: number, ry: number, color = 0xffa850) {
+  const g = new THREE.Group();
+  const iron = mat(solid(0x2a2624, 31, 0x4a4440));
+  g.add(box(0.12, 0.12, 0.4, iron, 0, 0, 0.2));
+  const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.04, 0.5, 6), mat(planks(0x5a3a1e, 32)));
+  stick.position.set(0, 0.2, 0.38);
+  stick.rotation.x = 0.35;
+  g.add(stick);
+  const flame = flameTexture(Math.floor(x * 13 + z * 7));
+  flames.push(flame);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: flame.texture, fog: false }));
+  sprite.scale.set(0.32, 0.64, 1);
+  sprite.position.set(0, 0.7, 0.5);
+  g.add(sprite);
+  add(g, x, y, z, ry);
+  lightAt(color, 9, 9, x + Math.sin(ry) * 0.7, y + 0.6, z + Math.cos(ry) * 0.7);
+}
+
+/** A candle (cathedral): a wax stick with a small flame. */
+function candle(x: number, z: number, h: number, y0 = 0) {
+  const wax = mat(solid(0xe8dcc0, 33, 0xc8b898));
+  add(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, h, 6), wax), x, y0 + h / 2, z);
+  const flame = flameTexture(Math.floor(x * 31 + z * 17), '#ffffd0', '#ffd060', '#ff9030');
+  flames.push(flame);
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: flame.texture, fog: false }));
+  s.scale.set(0.1, 0.2, 1);
+  add(s, x, y0 + h + 0.09, z);
 }
 
 function healthBar(y: number) {
   const g = new THREE.Group();
   const back = new THREE.Mesh(
-    new THREE.PlaneGeometry(1.1, 0.06),
+    new THREE.PlaneGeometry(1.1, 0.05),
     new THREE.MeshBasicMaterial({ color: 0x1a0a06, fog: false }),
   );
   const fill = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.8, 0.05),
+    new THREE.PlaneGeometry(0.8, 0.035),
     new THREE.MeshBasicMaterial({ color: 0xe07020, fog: false }),
   );
   fill.position.set(-0.15, 0, 0.001);
@@ -538,127 +419,602 @@ function healthBar(y: number) {
   return g;
 }
 
-function skeleton(withHelmet: boolean) {
-  const root = new THREE.Group();
-  const bone = mat(solid(0xd0c4a4, 81, 0.35, 0x8a7a5a));
-  const dark = mat(solid(0x5a4a38, 82, 0.3));
-  root.add(box(0.12, 0.8, 0.12, bone, -0.16, 0.4), box(0.12, 0.8, 0.12, bone, 0.16, 0.4)); // legs
-  root.add(box(0.5, 0.16, 0.26, bone, 0, 0.86)); // pelvis
-  root.add(box(0.08, 0.6, 0.08, dark, 0, 1.2, -0.05)); // spine
-  for (let i = 0; i < 4; i++) root.add(box(0.5 - i * 0.04, 0.05, 0.3, bone, 0, 1.18 + i * 0.12)); // ribs
-  root.add(box(0.7, 0.08, 0.16, bone, 0, 1.64)); // shoulders
-  const skull = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.34, 0.32), [
-    bone,
-    bone,
-    bone,
-    bone,
-    mat(skullFace(83)),
-    bone,
-  ]);
-  skull.position.set(0, 1.95, 0);
-  root.add(skull);
-  if (withHelmet) {
-    const red = mat(solid(0xa02018, 84, 0.3));
-    root.add(box(0.38, 0.12, 0.38, red, 0, 2.16));
-    for (const s of [-1, 1]) {
-      const horn = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.32, 4), bone);
-      horn.position.set(s * 0.22, 2.3, 0);
-      horn.rotation.z = -s * 0.6;
-      root.add(horn);
-    }
+function creature(
+  c: { root: THREE.Group; arm: THREE.Object3D; height: number; idle?: (t: number) => void },
+  x: number,
+  z: number,
+  ry: number,
+) {
+  const bar = healthBar(c.height + 0.35);
+  c.root.add(bar);
+  add(c.root, x, 0, z, ry);
+  creatures.push({ root: c.root, arm: c.arm, phase: x + z, bar, idle: c.idle ?? (() => undefined) });
+}
+
+// ---- crypt: low vaults, burial niches, sarcophagi; the restless dead ----------------------------
+
+function buildCrypt() {
+  const W = 10;
+  const L = 14;
+  const H = 3.2;
+  scene.fog = new THREE.Fog(0x0c0806, 2, 17);
+  scene.background = new THREE.Color(0x0c0806);
+  world.add(new THREE.AmbientLight(0x4a3828, 1.1));
+  const wallT = bricks(0x86735e, 0x2a2018, 1);
+  const floor = panel(W, L, flagstones(0x76685a, 2), 1.6);
+  floor.rotation.x = -Math.PI / 2;
+  add(floor, 0, 0, -L / 2 + 2);
+  const ceil = panel(W, L, bricks(0x5a4c3e, 0x1a1410, 3), 1.6);
+  ceil.rotation.x = Math.PI / 2;
+  add(ceil, 0, H, -L / 2 + 2);
+  // Heavy stone ribs across the low ceiling.
+  const rib = mat(repeat(wallT, 4, 0.3));
+  for (let z = 1; z > -L + 2; z -= 2.4) add(box(W, 0.35, 0.5, rib), 0, H - 0.17, z);
+  // Side walls full of burial niches: three rows of recesses with skulls and bones in them.
+  const niche = mat(solid(0x140c08, 34));
+  const bone = mat(solid(0xd8ccae, 35, 0x8a7a5a));
+  const skull = mat(face(0xd8ccae, 'skull', 36));
+  for (const side of [-1, 1]) {
+    const wall = panel(L, H, wallT, 1.4);
+    wall.rotation.y = (side * -Math.PI) / 2;
+    add(wall, (side * W) / 2, H / 2, -L / 2 + 2);
+    for (let z = 0.6; z > -L + 2.5; z -= 1.3)
+      for (const y of [0.55, 1.35, 2.15]) {
+        add(box(0.06, 0.55, 1.0, niche), side * (W / 2 - 0.02), y, z);
+        if ((z * 7 + y * 3) % 2 < 1.1) {
+          const s = box(0.22, 0.22, 0.22, [bone, bone, bone, bone, skull, bone], side * (W / 2 - 0.2), y - 0.15, z);
+          s.rotation.y = (side * -Math.PI) / 2;
+          world.add(s);
+        } else add(box(0.5, 0.06, 0.06, bone), side * (W / 2 - 0.2), y - 0.24, z + 0.1);
+      }
   }
-  root.add(box(0.1, 0.7, 0.1, bone, -0.38, 1.3)); // static arm
+  const back = panel(W, H, wallT, 1.4);
+  add(back, 0, H / 2, -L + 2);
+  // Sarcophagi in two rows, one with its lid knocked aside.
+  const stone = mat(repeat(bricks(0x9a8a72, 0x5a4c3e, 37), 0.5, 0.5));
+  for (const [x, z, open] of [
+    [-2.4, -3, false],
+    [2.4, -3, true],
+    [-2.4, -7, false],
+    [2.4, -7, false],
+  ] as const) {
+    add(box(1.0, 0.8, 2.1, stone), x, 0.4, z);
+    const lid = box(1.1, 0.16, 2.2, stone, 0, 0, 0);
+    add(lid, x + (open ? 0.5 : 0), 0.88, z + (open ? 0.3 : 0), open ? 0.4 : 0);
+    if (open) lid.rotation.z = -0.25;
+  }
+  // Cobwebs in the corners of the ribs.
+  const web = new THREE.MeshBasicMaterial({
+    color: 0xcfc8b8,
+    transparent: true,
+    opacity: 0.25,
+    side: THREE.DoubleSide,
+  });
+  for (const z of [-1.4, -6.2])
+    for (const side of [-1, 1])
+      add(new THREE.Mesh(new THREE.CircleGeometry(0.6, 5), web), side * (W / 2 - 0.4), H - 0.4, z, side * 0.8);
+  for (const z of [-0.5, -5.3, -10.1])
+    for (const side of [-1, 1]) torch(side * (W / 2 - 0.05), 1.9, z, (side * -Math.PI) / 2);
+
+  creature(skeletonWarrior(), -1.1, -4.6, 0.3);
+  creature(ghoul(), 0.6, -2.4, -0.15);
+  creature(skeletonArcher(), 2.6, -5.6, -0.4);
+  camera.position.set(0, 1.55, 2.2);
+}
+
+// ---- catacombs: a long vaulted tunnel, a water channel, a bridge; the drowned ------------------
+
+function buildCatacombs() {
+  const W = 7;
+  const L = 22;
+  scene.fog = new THREE.Fog(0x08120f, 2, 18);
+  scene.background = new THREE.Color(0x08120f);
+  world.add(new THREE.AmbientLight(0x1e3a32, 1.3));
+  const wallT = bricks(0x56665a, 0x1c2420, 11, 1, true);
+  // Barrel vault springing from the floor: half a cylinder seen from inside, bricks along the tunnel.
+  const R = W / 2 + 0.2;
+  const vault = new THREE.Mesh(
+    new THREE.CylinderGeometry(R, R, L, 16, 1, true, Math.PI / 2, Math.PI),
+    mat(repeat(wallT, 7, L / 1.4), { side: THREE.DoubleSide }),
+  );
+  vault.rotation.x = Math.PI / 2;
+  add(vault, 0, 0, -L / 2 + 3);
+  for (const side of [-1, 1]) {
+    // Walkways either side of the channel.
+    const walk = panel(2.2, L, flagstones(0x4a5a52, 12), 1.2);
+    walk.rotation.x = -Math.PI / 2;
+    add(walk, side * 2.4, 0, -L / 2 + 3);
+    // The channel's stone edge.
+    add(box(0.25, 0.25, L, mat(repeat(wallT, L / 1.4, 0.2))), side * 1.2, -0.05, -L / 2 + 3);
+  }
+  // The channel: dark water a little below the walkways.
+  const waterT = pixelTexture(32, 32, 71, (g, r) => {
+    g.fillStyle = '#123238';
+    g.fillRect(0, 0, 32, 32);
+    for (let i = 0; i < 60; i++) {
+      g.fillStyle = r() < 0.5 ? '#2a6a70' : '#0a2228';
+      dot(g, r() * 32, r() * 32, 1 + r() * 4, 0.5);
+    }
+  });
+  const water = new THREE.Mesh(
+    new THREE.PlaneGeometry(2.4, L).rotateX(-Math.PI / 2),
+    new THREE.MeshLambertMaterial({ map: repeat(waterT, 2, L / 1.2), transparent: true, opacity: 0.9 }),
+  );
+  add(water, 0, -0.35, -L / 2 + 3);
+  // Ribbed arches along the tunnel, every few metres.
+  const archMat = mat(repeat(bricks(0x46564a, 0x141c18, 14, 0.5), 4, 0.3));
+  for (let z = 1; z > -L + 3; z -= 3.5) {
+    const arch = new THREE.Mesh(new THREE.TorusGeometry(R - 0.15, 0.22, 4, 14, Math.PI), archMat);
+    add(arch, 0, 0, z);
+  }
+  // A stone bridge over the channel.
+  const bridgeMat = mat(repeat(bricks(0x6a7a6a, 0x2a3430, 15), 1, 0.5));
+  add(box(2.6, 0.3, 1.4, bridgeMat), 0, 0.15, -5.5);
+  for (const sx of [-1, 1]) add(box(0.15, 0.5, 1.4, bridgeMat), sx * 1.2, 0.5, -5.5);
+  // Hanging chains and moss-grown junk.
+  const iron = mat(solid(0x2a2c2a, 72, 0x5a3010));
+  for (const [x, z] of [
+    [-1.6, -2.5],
+    [1.4, -8.5],
+    [-0.4, -12],
+  ] as const)
+    for (let i = 0; i < 8; i++) add(box(0.05, 0.14, 0.05, iron), x, 4.6 - i * 0.16, z, i * 0.8);
+  const barrel = mat(planks(0x4a4a32, 73));
+  for (const [x, z] of [
+    [2.9, -1],
+    [2.7, -1.8],
+    [-2.9, -9],
+  ] as const)
+    add(new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.9, 10), barrel), x, 0.45, z);
+  // Green-shaded lanterns.
+  for (const z of [0, -7, -14])
+    for (const side of [-1, 1]) torch(side * (R - 0.75), 1.5, z + side, (side * -Math.PI) / 2, 0x9adf9a);
+
+  creature(drowned(), -2.2, -3.2, 0.35);
+  creature(bloated(), 2.3, -5, -0.3);
+  creature(leech(), -0.4, -2.2, 0.6);
+  creature(leech(), 0.5, -2.8, -0.4);
+  camera.position.set(-1.6, 1.55, 2.6);
+}
+
+// ---- cathedral: a tall nave, colonnades, stained glass, an altar; the faithful -----------------
+
+function buildCathedral() {
+  const W = 13;
+  const L = 24;
+  const H = 9;
+  scene.fog = new THREE.Fog(0x1a140e, 4, 30);
+  scene.background = new THREE.Color(0x1a140e);
+  world.add(new THREE.AmbientLight(0x4a4038, 1.2));
+  const wallT = bricks(0xb8ac94, 0x5a5040, 21);
+  const floor = panel(W, L, checker(0xd8d0c0, 0x1e1a18, 22), 1.6);
+  floor.rotation.x = -Math.PI / 2;
+  add(floor, 0, 0, -L / 2 + 3);
+  // A red carpet down the nave.
+  const carpet = panel(2, L - 4, solid(0x7a1414, 23, 0xb0802a, true), 1);
+  carpet.rotation.x = -Math.PI / 2;
+  add(carpet, 0, 0.01, -L / 2 + 1);
+  const ceil = panel(W, L, bricks(0x8a806c, 0x3a3428, 24), 2);
+  ceil.rotation.x = Math.PI / 2;
+  add(ceil, 0, H, -L / 2 + 3);
+  for (const side of [-1, 1]) {
+    const wall = panel(L, H, wallT, 1.6);
+    wall.rotation.y = (side * -Math.PI) / 2;
+    add(wall, (side * W) / 2, H / 2, -L / 2 + 3);
+  }
+  add(panel(W, H, wallT, 1.6), 0, H / 2, -L + 3);
+  // Two colonnades of tall columns with capitals and bases, joined by beams.
+  const colMat = mat(repeat(bricks(0xc8bca4, 0x6a6050, 25), 2, 5));
+  const capMat = mat(repeat(bricks(0xa89c84, 0x5a5040, 26), 1, 0.3));
+  for (let z = 0; z > -L + 5; z -= 3.6)
+    for (const side of [-1, 1]) {
+      add(
+        new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.48, H - 1.2, 12), colMat),
+        side * 3.4,
+        (H - 1.2) / 2 + 0.3,
+        z,
+      );
+      add(box(1.2, 0.3, 1.2, capMat), side * 3.4, 0.15, z);
+      add(box(1.2, 0.5, 1.2, capMat), side * 3.4, H - 0.65, z);
+    }
+  for (const side of [-1, 1]) add(box(0.6, 0.6, L - 5, capMat), side * 3.4, H - 0.3, -L / 2 + 2.6);
+  // Tall stained-glass windows along both walls, throwing coloured light in.
+  const glass = pixelTexture(16, 40, 61, (g, r) => {
+    const colors = ['#c02030', '#2040c0', '#e0b020', '#20a050', '#8030b0'];
+    for (let y = 0; y < 40; y += 4)
+      for (let x = 0; x < 16; x += 4) {
+        g.fillStyle = colors[Math.floor(r() * colors.length)]!;
+        g.fillRect(x, y, 4, 4);
+      }
+    g.fillStyle = '#100a08';
+    for (let i = 0; i <= 16; i += 4) g.fillRect(i, 0, 0.6, 40);
+    for (let i = 0; i <= 40; i += 4) g.fillRect(0, i, 16, 0.6);
+    g.clearRect(0, 0, 3, 3);
+    g.clearRect(13, 0, 3, 3);
+  });
+  const glassMat = new THREE.MeshBasicMaterial({ map: glass, fog: false, transparent: true });
+  for (let z = -1.8; z > -L + 5; z -= 3.6)
+    for (const side of [-1, 1]) {
+      const w = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 3.5), glassMat);
+      add(w, side * (W / 2 - 0.02), 5.2, z, (side * -Math.PI) / 2);
+    }
+  const shaft = new THREE.MeshBasicMaterial({
+    color: 0xb090ff,
+    transparent: true,
+    opacity: 0.06,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  for (const z of [-5.4, -12.6]) {
+    const beam = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 9), shaft);
+    beam.rotation.set(0, Math.PI / 2, -0.7);
+    add(beam, 3.5, 3.4, z, Math.PI / 2);
+  }
+  // The altar at the far end: steps, a draped block, tall candles, a gold sun.
+  const stepMat = mat(repeat(bricks(0xa89c84, 0x5a5040, 27), 3, 0.3));
+  for (let i = 0; i < 3; i++) add(box(6 - i * 1.2, 0.25, 3 - i * 0.6, stepMat), 0, 0.125 + i * 0.25, -L + 5 + i * 0.1);
+  add(box(2.4, 1.0, 1.0, mat(solid(0xe8e0d0, 28, 0xd0a030, true))), 0, 1.25, -L + 4.6);
+  const gold = mat(solid(0xd8a830, 29, 0xffe080));
+  add(new THREE.Mesh(new THREE.TorusGeometry(1.1, 0.12, 4, 12), gold), 0, 4.2, -L + 3.15);
+  for (let i = 0; i < 8; i++) {
+    const ray = box(0.08, 0.7, 0.08, gold);
+    ray.rotation.z = (i * Math.PI) / 4;
+    add(ray, Math.sin((i * Math.PI) / 4) * 1.6, 4.2 + Math.cos((i * Math.PI) / 4) * 1.6, -L + 3.15);
+    ray.rotation.z = -(i * Math.PI) / 4;
+  }
+  for (const x of [-2.6, -2, 2, 2.6]) candle(x, -L + 5.6, 1.2 + Math.abs(x) * 0.15, 0.5);
+  for (const x of [-0.8, -0.3, 0.3, 0.8]) candle(x, -L + 4.6, 0.3, 1.75);
+  lightAt(0xffd890, 12, 16, 0, 3, -L + 6);
+  lightAt(0xffd890, 8, 14, 0, 6, -6);
+  lightAt(0xb090ff, 6, 12, 4, 4, -9);
+
+  creature(templar(), -1.3, -5.2, 0.25);
+  creature(acolyte(), 1.6, -6.6, -0.3);
+  creature(bellringer(), -2.2, -2.6, 0.35);
+  camera.position.set(0, 1.55, 3.4);
+}
+
+// ---- creatures: nine distinct silhouettes ------------------------------------------------------
+
+type Creature = { root: THREE.Group; arm: THREE.Group; height: number; idle?: (t: number) => void };
+
+function limb(len: number, thick: number, m: THREE.Material, x: number, y: number, z = 0) {
+  return box(thick, len, thick, m, x, y - len / 2, z);
+}
+
+function skeletonWarrior(): Creature {
+  const root = new THREE.Group();
+  const bone = mat(solid(0xd0c4a4, 81, 0x8a7a5a));
+  const dark = mat(solid(0x5a4a38, 82));
+  const red = mat(solid(0xa02018, 84, 0x601010));
+  root.add(limb(0.8, 0.11, bone, -0.16, 0.8), limb(0.8, 0.11, bone, 0.16, 0.8));
+  root.add(box(0.5, 0.16, 0.26, bone, 0, 0.86), box(0.08, 0.6, 0.08, dark, 0, 1.2, -0.05));
+  for (let i = 0; i < 4; i++) root.add(box(0.5 - i * 0.04, 0.05, 0.3, bone, 0, 1.18 + i * 0.12));
+  root.add(box(0.72, 0.09, 0.18, bone, 0, 1.64));
+  root.add(box(0.32, 0.34, 0.32, [bone, bone, bone, bone, mat(face(0xd0c4a4, 'skull', 83)), bone], 0, 1.95));
+  root.add(box(0.38, 0.12, 0.38, red, 0, 2.16));
+  for (const s of [-1, 1]) {
+    const horn = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.34, 5), bone);
+    horn.position.set(s * 0.24, 2.3, 0);
+    horn.rotation.z = -s * 0.6;
+    root.add(horn);
+  }
+  // Round shield on the left arm.
+  root.add(limb(0.7, 0.1, bone, -0.38, 1.64));
+  const shield = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.05, 10), mat(planks(0x6a4424, 86)));
+  shield.rotation.z = Math.PI / 2;
+  shield.position.set(-0.48, 1.2, 0.08);
+  root.add(shield);
   const arm = new THREE.Group();
   arm.position.set(0.38, 1.62, 0);
-  arm.add(box(0.1, 0.7, 0.1, bone, 0, -0.35));
-  const rust = mat(solid(0x8a6a50, 85, 0.5, 0x5a2a10));
-  arm.add(box(0.06, 0.9, 0.14, rust, 0, -1.1, 0.1));
+  arm.add(limb(0.7, 0.1, bone, 0, 0));
+  arm.add(box(0.06, 0.9, 0.14, mat(solid(0x8a6a50, 85, 0x5a2a10)), 0, -1.1, 0.1));
   root.add(arm);
-  return { root, arm };
+  return { root, arm, height: 2.4 };
 }
 
-function imp() {
+/** Hunched, long-armed, knuckles near the floor: an animal more than a man. */
+function ghoul(): Creature {
   const root = new THREE.Group();
-  const skin = mat(solid(0xc8c030, 91, 0.35, 0x7a8a20));
-  const armour = mat(solid(0xb02a18, 92, 0.35, 0x601008));
-  root.add(box(0.14, 0.7, 0.14, skin, -0.14, 0.35), box(0.14, 0.7, 0.14, skin, 0.14, 0.35));
-  root.add(box(0.5, 0.6, 0.3, armour, 0, 1.0));
-  const head = box(0.34, 0.32, 0.3, skin, 0, 1.5);
-  root.add(head);
-  for (const s of [-1, 1]) {
-    const ear = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.4, 4), skin);
-    ear.position.set(s * 0.28, 1.6, 0);
-    ear.rotation.z = -s * 1.1;
-    root.add(ear);
+  const skin = mat(solid(0x7a8a6a, 91, 0x4a5a3a));
+  const rags = mat(solid(0x3a3028, 92, 0x1a140e));
+  root.add(limb(0.55, 0.13, skin, -0.2, 0.55), limb(0.55, 0.13, skin, 0.2, 0.55));
+  const torso = new THREE.Group();
+  torso.position.set(0, 0.6, 0);
+  torso.rotation.x = 0.75;
+  torso.add(box(0.5, 0.75, 0.32, skin, 0, 0.38, 0));
+  torso.add(box(0.52, 0.22, 0.34, rags, 0, 0.05, 0));
+  for (let i = 0; i < 3; i++) torso.add(box(0.46, 0.03, 0.02, mat(solid(0x5a6a4a, 93)), 0, 0.35 + i * 0.12, 0.17));
+  const head = box(0.3, 0.28, 0.32, [skin, skin, skin, skin, mat(face(0x7a8a6a, 'ghoul', 94)), skin], 0, 0.85, 0.08);
+  torso.add(head);
+  root.add(torso);
+  // Long arms hanging nearly to the floor, with claws.
+  const claw = mat(solid(0x2a2418, 95));
+  root.add(limb(1.0, 0.1, skin, -0.34, 1.15, 0.35));
+  for (const dx of [-0.05, 0, 0.05]) root.add(box(0.02, 0.14, 0.02, claw, -0.34 + dx, 0.1, 0.38));
+  const arm = new THREE.Group();
+  arm.position.set(0.34, 1.15, 0.35);
+  arm.add(limb(1.0, 0.1, skin, 0, 0));
+  for (const dx of [-0.05, 0, 0.05]) arm.add(box(0.02, 0.14, 0.02, claw, dx, -1.05, 0.03));
+  root.add(arm);
+  return { root, arm, height: 1.6 };
+}
+
+function skeletonArcher(): Creature {
+  const root = new THREE.Group();
+  const bone = mat(solid(0xc8bc9c, 101, 0x8a7a5a));
+  const cloth = mat(solid(0x2a3a2a, 102, 0x1a241a));
+  root.add(limb(0.8, 0.1, bone, -0.15, 0.8), limb(0.8, 0.1, bone, 0.15, 0.8));
+  root.add(box(0.46, 0.15, 0.24, bone, 0, 0.86));
+  for (let i = 0; i < 4; i++) root.add(box(0.46 - i * 0.04, 0.05, 0.28, bone, 0, 1.16 + i * 0.12));
+  root.add(box(0.7, 0.42, 0.34, cloth, 0, 1.55, -0.02)); // mantle
+  root.add(box(0.3, 0.32, 0.3, [bone, bone, bone, bone, mat(face(0xc8bc9c, 'skull', 103)), bone], 0, 1.92));
+  const hood = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.5, 6), cloth);
+  hood.position.set(0, 2.1, -0.04);
+  root.add(hood);
+  root.add(box(0.14, 0.7, 0.14, mat(planks(0x5a3a1e, 104)), 0.1, 1.5, -0.28)); // quiver
+  const arm = new THREE.Group();
+  arm.position.set(-0.36, 1.6, 0);
+  arm.add(limb(0.65, 0.09, bone, 0, 0));
+  const bowMat = mat(planks(0x6a4424, 105));
+  for (let i = -4; i <= 4; i++) {
+    const seg = box(0.04, 0.2, 0.04, bowMat, 0, -0.7 + i * 0.18, Math.cos(i / 3) * 0.18);
+    seg.rotation.x = -i * 0.12;
+    arm.add(seg);
   }
-  root.add(box(0.12, 0.6, 0.12, skin, -0.34, 0.95));
-  const arm = new THREE.Group();
-  arm.position.set(0.34, 1.25, 0);
-  arm.add(box(0.12, 0.6, 0.12, skin, 0, -0.3));
-  arm.add(box(0.05, 1.6, 0.05, mat(planks(0x5a3a1e, 93)), 0, -0.4, 0.2));
   root.add(arm);
-  return { root, arm };
+  return { root, arm, height: 2.35 };
 }
 
-function hooded() {
+/** Tall, thin and stooped, long wet hair over the face, a hook on a chain. */
+function drowned(): Creature {
   const root = new THREE.Group();
-  const cloth = mat(solid(0x3a2a20, 101, 0.4, 0x1a120c));
-  const robe = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.55, 1.6, 7), cloth);
-  robe.position.y = 0.8;
-  const hood = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.55, 6), cloth);
-  hood.position.y = 1.85;
-  const face = box(0.2, 0.18, 0.05, new THREE.MeshBasicMaterial({ color: 0x080404 }), 0, 1.72, 0.2);
-  root.add(robe, hood, face);
+  const skin = mat(solid(0x8aa4a8, 111, 0x5a7a80));
+  const rags = mat(solid(0x2a3a3e, 112, 0x14201e));
+  const hair = mat(solid(0x16201a, 113, 0x2a4a2a, true));
+  root.add(limb(1.0, 0.1, skin, -0.13, 1.0), limb(1.0, 0.1, skin, 0.13, 1.0));
+  const robe = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.42, 1.3, 7, 1, true), rags);
+  robe.position.y = 1.0;
+  root.add(robe);
+  root.add(box(0.42, 0.6, 0.26, rags, 0, 1.85));
+  const head = box(
+    0.28,
+    0.36,
+    0.28,
+    [skin, skin, skin, skin, mat(face(0x8aa4a8, 'drowned', 114)), skin],
+    0,
+    2.35,
+    0.08,
+  );
+  head.rotation.x = 0.3;
+  root.add(head);
+  // Long hair hanging down front and back.
+  for (const [x, z] of [
+    [-0.1, 0.24],
+    [0.1, 0.24],
+    [0, -0.12],
+    [-0.15, 0.05],
+    [0.15, 0.05],
+  ] as const)
+    root.add(box(0.08, 0.7, 0.03, hair, x, 2.1, z));
+  root.add(limb(0.95, 0.08, skin, -0.3, 2.1, 0.1));
   const arm = new THREE.Group();
-  arm.position.set(0.35, 1.4, 0);
-  arm.add(box(0.14, 0.6, 0.14, cloth, 0, -0.3));
+  arm.position.set(0.3, 2.1, 0.1);
+  arm.add(limb(0.95, 0.08, skin, 0, 0));
+  const iron = mat(solid(0x3a3430, 115, 0x6a3010));
+  for (let i = 0; i < 4; i++) arm.add(box(0.04, 0.1, 0.04, iron, 0, -1.0 - i * 0.12, 0));
+  const hook = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.03, 4, 8, Math.PI * 1.4), iron);
+  hook.position.set(0, -1.6, 0.08);
+  arm.add(hook);
   root.add(arm);
-  return { root, arm };
+  return {
+    root,
+    arm,
+    height: 2.6,
+    idle: (t) => {
+      head.rotation.z = Math.sin(t / 700) * 0.15;
+    },
+  };
 }
 
-function enemies(b: Biome) {
-  const list =
-    b === 'cathedral'
-      ? [hooded(), skeleton(false), hooded()]
-      : b === 'catacombs'
-        ? [hooded(), skeleton(false), skeleton(false)]
-        : [hooded(), skeleton(true), imp()];
-  const spots: [number, number, number][] = [
-    [-1.3, 0.4, 0.35],
-    [0.05, 1.3, 0],
-    [1.4, 0.2, -0.35],
-  ];
-  list.forEach((m, i) => {
-    const [x, z, ry] = spots[i]!;
-    m.root.position.set(x * CELL * 0.8, 0, z * CELL * 0.8);
-    m.root.rotation.y = ry;
-    const bar = healthBar(2.6);
-    m.root.add(bar);
-    room.add(m.root);
-    monsters.push({ root: m.root, arm: m.arm, phase: i * 1.7, bar });
+/** A swollen sack of a body on stubby legs, covered in boils. */
+function bloated(): Creature {
+  const root = new THREE.Group();
+  const skin = mat(solid(0x8a8a5a, 121, 0x6a3a5a));
+  const boil = mat(solid(0xa0a060, 122, 0xd0e080));
+  root.add(limb(0.45, 0.16, skin, -0.25, 0.45), limb(0.45, 0.16, skin, 0.25, 0.45));
+  const belly = new THREE.Mesh(new THREE.IcosahedronGeometry(0.75, 1), skin);
+  belly.position.y = 1.15;
+  belly.scale.set(1, 0.95, 0.9);
+  root.add(belly);
+  const r = mulberry(123);
+  for (let i = 0; i < 9; i++) {
+    const a = r() * Math.PI * 2;
+    const b = r() * Math.PI - Math.PI / 2;
+    const p = new THREE.Mesh(new THREE.IcosahedronGeometry(0.1 + r() * 0.08, 0), boil);
+    p.position.set(Math.cos(a) * Math.cos(b) * 0.72, 1.15 + Math.sin(b) * 0.7, Math.sin(a) * Math.cos(b) * 0.65);
+    root.add(p);
+  }
+  root.add(box(0.24, 0.22, 0.24, [skin, skin, skin, skin, mat(face(0x8a8a5a, 'drowned', 124)), skin], 0, 1.95, 0.1));
+  root.add(limb(0.4, 0.1, skin, -0.7, 1.35, 0.1));
+  const arm = new THREE.Group();
+  arm.position.set(0.7, 1.35, 0.1);
+  arm.add(limb(0.4, 0.1, skin, 0, 0));
+  root.add(arm);
+  return {
+    root,
+    arm,
+    height: 2.1,
+    idle: (t) => {
+      const k = 1 + Math.sin(t / 300) * 0.04;
+      belly.scale.set(k, 0.95 * k, 0.9 * k);
+    },
+  };
+}
+
+/** A fat leech: ringed segments low to the floor, a round mouth of teeth that rears up. */
+function leech(): Creature {
+  const root = new THREE.Group();
+  const body = new THREE.Group();
+  const a = mat(solid(0x5a1414, 131, 0x2a0606, true));
+  const b = mat(solid(0x7a2a1a, 132, 0x3a0a06, true));
+  for (let i = 0; i < 6; i++) {
+    const r = 0.12 + Math.sin((i / 5) * Math.PI) * 0.1;
+    const seg = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 1), i % 2 ? a : b);
+    seg.position.set(0, r, -0.6 + i * 0.2);
+    body.add(seg);
+  }
+  const mouth = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.13, 0.1, 8), mat(solid(0x1a0606, 133, 0xe8d8c0)));
+  mouth.rotation.x = Math.PI / 2;
+  mouth.position.set(0, 0.16, 0.5);
+  body.add(mouth);
+  root.add(body);
+  return {
+    root,
+    arm: body,
+    height: 0.4,
+    idle: (t) => {
+      body.children.forEach((c, i) => (c.position.x = Math.sin(t / 250 + i * 0.8) * 0.05));
+    },
+  };
+}
+
+/** Full plate, a great helm with an eye slit, a white tabard with a gold cross, a tower shield. */
+function templar(): Creature {
+  const root = new THREE.Group();
+  const steel = mat(solid(0x9aa0aa, 141, 0x5a606a));
+  const white = mat(solid(0xe8e4d8, 142, 0xb0a890));
+  const gold = mat(solid(0xd0a030, 143, 0xffe080));
+  root.add(limb(0.85, 0.15, steel, -0.17, 0.85), limb(0.85, 0.15, steel, 0.17, 0.85));
+  root.add(box(0.58, 0.75, 0.34, steel, 0, 1.25));
+  root.add(box(0.5, 0.95, 0.03, white, 0, 1.05, 0.18));
+  root.add(box(0.08, 0.7, 0.035, gold, 0, 1.15, 0.2), box(0.36, 0.08, 0.035, gold, 0, 1.3, 0.2));
+  for (const s of [-1, 1]) root.add(box(0.28, 0.2, 0.36, steel, s * 0.42, 1.62)); // pauldrons
+  root.add(box(0.34, 0.4, 0.34, [steel, steel, steel, steel, mat(face(0x9aa0aa, 'helm', 144)), steel], 0, 1.85));
+  // Tower shield.
+  const shieldT = pixelTexture(16, 24, 145, (g) => {
+    g.fillStyle = '#e8e4d8';
+    g.fillRect(0, 0, 16, 24);
+    g.fillStyle = '#d0a030';
+    g.fillRect(7, 2, 2, 20);
+    g.fillRect(3, 8, 10, 2);
+    g.fillStyle = '#5a606a';
+    g.fillRect(0, 0, 16, 0.6);
+    g.fillRect(0, 23.4, 16, 0.6);
+    g.fillRect(0, 0, 0.6, 24);
+    g.fillRect(15.4, 0, 0.6, 24);
   });
+  root.add(box(0.06, 1.25, 0.75, [steel, steel, steel, steel, mat(shieldT), mat(shieldT)], -0.48, 1.1, 0.15));
+  const arm = new THREE.Group();
+  arm.position.set(0.42, 1.6, 0);
+  arm.add(limb(0.7, 0.13, steel, 0, 0));
+  arm.add(box(0.05, 1.1, 0.1, mat(solid(0xc8ccd4, 146)), 0, -1.2, 0.12));
+  arm.add(box(0.26, 0.05, 0.08, gold, 0, -0.68, 0.12));
+  root.add(arm);
+  return { root, arm, height: 2.1 };
+}
+
+/** A white-robed priest with a golden mask, swinging a smoking censer. */
+function acolyte(): Creature {
+  const root = new THREE.Group();
+  const robeMat = mat(solid(0xe0dccc, 151, 0xb8a888, true));
+  const gold = mat(solid(0xd8a830, 152, 0xffe080));
+  const robe = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.5, 1.6, 8), robeMat);
+  robe.position.y = 0.8;
+  root.add(robe);
+  root.add(box(0.06, 1.5, 0.02, gold, 0, 0.85, 0.36));
+  root.add(box(0.44, 0.4, 0.3, robeMat, 0, 1.75));
+  const hood = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.55, 8), robeMat);
+  hood.position.set(0, 2.25, -0.02);
+  root.add(hood);
+  root.add(box(0.24, 0.26, 0.04, mat(face(0xe8c050, 'mask', 153)), 0, 2.05, 0.15));
+  root.add(limb(0.6, 0.1, robeMat, -0.3, 1.9));
+  const arm = new THREE.Group();
+  arm.position.set(0.3, 1.9, 0.05);
+  arm.add(limb(0.6, 0.1, robeMat, 0, 0));
+  for (let i = 0; i < 4; i++) arm.add(box(0.02, 0.1, 0.02, gold, 0, -0.65 - i * 0.1, 0.05));
+  const censer = new THREE.Mesh(new THREE.IcosahedronGeometry(0.1, 0), gold);
+  censer.position.set(0, -1.12, 0.05);
+  arm.add(censer);
+  const smoke = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(0.14, 0),
+    new THREE.MeshBasicMaterial({ color: 0xd0c8b8, transparent: true, opacity: 0.35, fog: false }),
+  );
+  smoke.position.set(0, -0.9, 0.05);
+  arm.add(smoke);
+  root.add(arm);
+  return {
+    root,
+    arm,
+    height: 2.5,
+    idle: (t) => {
+      smoke.position.y = -0.9 + ((t / 900) % 1) * 0.6;
+      (smoke.material as THREE.MeshBasicMaterial).opacity = 0.4 * (1 - ((t / 900) % 1));
+    },
+  };
+}
+
+/** A hunchback monk in brown, a great bronze bell held in both arms. */
+function bellringer(): Creature {
+  const root = new THREE.Group();
+  const robeMat = mat(solid(0x5a3e24, 161, 0x2a1a0c, true));
+  const skin = mat(solid(0xc89a78, 162, 0x8a6a50));
+  const bronze = mat(solid(0xb07a30, 163, 0xe0b060));
+  const robe = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.5, 1.2, 8), robeMat);
+  robe.position.y = 0.6;
+  root.add(robe);
+  const back = new THREE.Group();
+  back.position.set(0, 1.15, 0);
+  back.rotation.x = 0.5;
+  back.add(box(0.6, 0.6, 0.45, robeMat, 0, 0.25, -0.05));
+  back.add(new THREE.Mesh(new THREE.IcosahedronGeometry(0.32, 1), robeMat).translateY(0.45).translateZ(-0.22)); // hump
+  back.add(box(0.28, 0.28, 0.28, [skin, skin, skin, skin, mat(face(0xc89a78, 'hood', 164)), skin], 0, 0.62, 0.22));
+  const cowl = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.4, 7), robeMat);
+  cowl.position.set(0, 0.85, 0.15);
+  back.add(cowl);
+  root.add(back);
+  const arm = new THREE.Group();
+  arm.position.set(0, 1.35, 0.4);
+  const bell = new THREE.Mesh(
+    new THREE.LatheGeometry(
+      [
+        new THREE.Vector2(0.05, 0.5),
+        new THREE.Vector2(0.2, 0.42),
+        new THREE.Vector2(0.26, 0.2),
+        new THREE.Vector2(0.38, 0),
+      ],
+      10,
+    ),
+    bronze,
+  );
+  bell.position.set(0, -0.8, 0.15);
+  arm.add(bell);
+  arm.add(limb(0.35, 0.09, skin, -0.2, 0), limb(0.35, 0.09, skin, 0.2, 0));
+  root.add(arm);
+  return { root, arm, height: 2.0 };
 }
 
 // ---- the hero's hands: a sword in the right, a shield on the left -----------------------------
 
 const hands = new THREE.Group();
 camera.add(hands);
-const gauntlet = mat(solid(0xc8c8cc, 111, 0.35, 0x8a1a10));
-const steel = mat(solid(0xb0b4bc, 112, 0.25, 0x7a1010));
+const gauntlet = mat(solid(0xc8c8cc, 171, 0x8a1a10));
+const steel = mat(solid(0xb0b4bc, 172, 0x7a1010));
 const right = new THREE.Group();
-right.add(box(0.14, 0.14, 0.42, gauntlet, 0, 0, 0.1)); // forearm
-right.add(box(0.16, 0.14, 0.14, gauntlet, 0, 0.02, -0.14)); // fist
+right.add(box(0.14, 0.14, 0.42, gauntlet, 0, 0, 0.1));
+right.add(box(0.16, 0.14, 0.14, gauntlet, 0, 0.02, -0.14));
 for (let i = 0; i < 3; i++) {
-  const spike = new THREE.Mesh(new THREE.ConeGeometry(0.025, 0.08, 4), mat(solid(0x8a1a10, 113)));
+  const spike = new THREE.Mesh(new THREE.ConeGeometry(0.025, 0.08, 4), mat(solid(0x8a1a10, 173)));
   spike.position.set(0.08, 0.02, 0.15 - i * 0.12);
   spike.rotation.z = -Math.PI / 2;
   right.add(spike);
 }
 const sword = new THREE.Group();
-sword.add(box(0.04, 0.16, 0.04, mat(planks(0x3a2414, 114)), 0, 0.02, 0)); // grip
-sword.add(box(0.26, 0.03, 0.05, steel, 0, 0.1, 0)); // guard
-sword.add(box(0.1, 0.72, 0.02, steel, 0, 0.47, 0)); // blade
-sword.add(box(0.02, 0.72, 0.024, mat(solid(0xe8eaf0, 116, 0.15)), 0, 0.47, 0)); // bright fuller
+sword.add(box(0.04, 0.16, 0.04, mat(planks(0x3a2414, 174)), 0, 0.02, 0));
+sword.add(box(0.26, 0.03, 0.05, steel, 0, 0.1, 0));
+sword.add(box(0.1, 0.72, 0.02, steel, 0, 0.47, 0));
+sword.add(box(0.02, 0.72, 0.024, mat(solid(0xe8eaf0, 175)), 0, 0.47, 0));
 const tip = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.14, 4), steel);
 tip.position.set(0, 0.9, 0);
 tip.rotation.y = Math.PI / 4;
@@ -672,37 +1028,39 @@ right.rotation.set(0.1, -0.2, 0.1);
 hands.add(right);
 const left = new THREE.Group();
 left.add(box(0.14, 0.14, 0.42, gauntlet, 0, 0, 0.1));
-const shieldTex = pixelTexture(16, 16, 115, (g, r) => {
+const shieldT = pixelTexture(16, 16, 176, (g) => {
   g.fillStyle = '#6a4424';
   g.fillRect(0, 0, 16, 16);
   g.fillStyle = '#8a2018';
   g.fillRect(6, 0, 4, 16);
   g.fillRect(0, 6, 16, 4);
   g.fillStyle = '#3a3634';
-  g.fillRect(0, 0, 16, 1);
-  g.fillRect(0, 15, 16, 1);
-  g.fillRect(0, 0, 1, 16);
-  g.fillRect(15, 0, 1, 16);
-  grain(g, 16, 16, r, 0.3);
+  g.fillRect(0, 0, 16, 0.6);
+  g.fillRect(0, 15.4, 16, 0.6);
+  g.fillRect(0, 0, 0.6, 16);
+  g.fillRect(15.4, 0, 0.6, 16);
 });
-const shield = box(0.34, 0.42, 0.04, mat(shieldTex), 0.04, 0.05, -0.12);
-left.add(shield);
+left.add(box(0.34, 0.42, 0.04, mat(shieldT), 0.04, 0.05, -0.12));
 left.position.set(-0.5, -0.42, -0.62);
 left.rotation.set(0.05, 0.55, -0.15);
 hands.add(left);
 
-// ---- camera, input, loop ------------------------------------------------------------------------
+// ---- input and loop -------------------------------------------------------------------------------
 
-const VIEWS: Record<number, { pos: [number, number, number]; yaw: number; pitch: number }> = {
-  1: { pos: [0, 1.55, SIZE / 2 - 2.2], yaw: 0, pitch: -0.05 },
-  2: { pos: [-SIZE / 2 + 2.2, 1.55, SIZE / 2 - 2.4], yaw: -0.55, pitch: -0.02 },
-  3: { pos: [2.2, 1.55, 1.5], yaw: 0.35, pitch: 0.1 },
-};
-const v = VIEWS[view] ?? VIEWS[1]!;
-camera.position.set(...v.pos);
-let yaw = v.yaw;
-let pitch = v.pitch;
+let yaw = 0;
+let pitch = 0;
 let swingStart = -1e9;
+function build(b: Biome) {
+  world.clear();
+  lights.length = 0;
+  flames.length = 0;
+  creatures.length = 0;
+  if (b === 'catacombs') buildCatacombs();
+  else if (b === 'cathedral') buildCathedral();
+  else buildCrypt();
+  yaw = b === 'catacombs' ? -0.12 : 0;
+  pitch = b === 'cathedral' ? 0.06 : -0.03;
+}
 
 let dragging = false;
 canvas.addEventListener('pointerdown', () => (dragging = true));
@@ -710,14 +1068,14 @@ window.addEventListener('pointerup', () => (dragging = false));
 window.addEventListener('pointermove', (e) => {
   if (!dragging) return;
   yaw -= e.movementX * 0.004;
-  pitch = Math.max(-0.6, Math.min(0.6, pitch - e.movementY * 0.004));
+  pitch = Math.max(-0.6, Math.min(0.8, pitch - e.movementY * 0.004));
 });
 window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') swingStart = performance.now();
   const b = ({ Digit1: 'crypt', Digit2: 'catacombs', Digit3: 'cathedral' } as Record<string, Biome>)[e.code];
   if (b) {
     biome = b;
-    buildRoom(biome);
+    build(biome);
   }
 });
 
@@ -728,14 +1086,14 @@ function resize() {
   const lowW = Math.round((LOW_H * w) / h);
   target.setSize(lowW, LOW_H);
   (post.material as THREE.ShaderMaterial).uniforms.uRes!.value.set(lowW, LOW_H);
-  snapRes.set(lowW * 0.75, LOW_H * 0.75);
+  // Vertex wobble at a coarser grid than the pixels, so it still reads at high resolution.
+  snapRes.set(lowW * 0.6, LOW_H * 0.6);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
 window.addEventListener('resize', resize);
 resize();
-buildRoom(biome);
-if (params.has('swing')) swingStart = performance.now() - 120;
+build(biome);
 
 let frame = 0;
 function loop(now: number) {
@@ -744,19 +1102,18 @@ function loop(now: number) {
   if (frame % 6 === 0) for (const f of flames) f.redraw();
   for (const l of lights)
     l.light.intensity = l.base * (0.85 + 0.1 * Math.sin(t / 90 + l.phase) + 0.05 * Math.sin(t / 37));
-  for (const m of monsters) {
-    m.root.position.y = Math.abs(Math.sin(t / 400 + m.phase)) * 0.04;
-    m.arm.rotation.x = -0.6 + Math.sin(t / 500 + m.phase) * 0.5;
-    m.bar.quaternion.copy(camera.quaternion);
+  for (const c of creatures) {
+    c.root.position.y = Math.abs(Math.sin(t / 420 + c.phase)) * 0.03;
+    c.arm.rotation.x = -0.4 + Math.sin(t / 520 + c.phase) * 0.35;
+    c.bar.quaternion.copy(camera.quaternion);
+    c.idle(t);
   }
   camera.rotation.set(pitch + (still ? 0 : Math.sin(now / 900) * 0.01), yaw, 0, 'YXZ');
-  // Hands: a little sway while idle, a chop on Space.
   const s = (now - swingStart) / 320;
   const chop = s >= 0 && s < 1 ? Math.sin(s * Math.PI) : 0;
   right.rotation.x = 0.1 - chop * 1.3;
   right.position.y = -0.32 + chop * 0.12 + (still ? 0 : Math.sin(now / 600) * 0.01);
-  left.position.y = -0.36 + (still ? 0 : Math.sin(now / 600 + 1) * 0.01);
-
+  left.position.y = -0.42 + (still ? 0 : Math.sin(now / 600 + 1) * 0.01);
   renderer.setRenderTarget(target);
   renderer.render(scene, camera);
   renderer.setRenderTarget(null);
