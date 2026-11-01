@@ -463,5 +463,9 @@
   "affix.shielded": "Щитоносец",
   "affix.thorny": "Шипастый",
   "reward.worksWith": "Работает с твоими: {list}",
-  "reward.worksWithLater": "Работает со способностями твоего класса, которые ещё можно найти"
+  "reward.worksWithLater": "Работает со способностями твоего класса, которые ещё можно найти",
+  "settings.title": "Графика",
+  "settings.style": "Стиль",
+  "settings.smooth": "Гладкий",
+  "settings.retro": "Ретро-пиксели"
 }

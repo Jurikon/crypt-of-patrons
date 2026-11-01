@@ -1,8 +1,31 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { toGeometry } from './caveMesh';
-import { createVolume, greedyMesh, setVoxel } from './voxel/mesher';
+import { createVolume, greedyMesh, setVoxel, type MeshData } from './voxel/mesher';
 import type { ModelVoxel, PropModel, VoxelModel } from './voxel/models';
+
+/** Converts mesher output (voxel units) to a world-space geometry with per-vertex colours. */
+function toGeometry(m: MeshData, scale: number, offset: THREE.Vector3, color: (v: number) => readonly number[]) {
+  const pos = new Float32Array(m.positions.length);
+  for (let i = 0; i < pos.length; i += 3) {
+    pos[i] = (m.positions[i] as number) * scale + offset.x;
+    pos[i + 1] = (m.positions[i + 1] as number) * scale + offset.y;
+    pos[i + 2] = (m.positions[i + 2] as number) * scale + offset.z;
+  }
+  const col = new Float32Array(m.values.length * 3);
+  for (let i = 0; i < m.values.length; i++) {
+    const c = color(m.values[i] as number);
+    col[i * 3] = c[0] as number;
+    col[i * 3 + 1] = c[1] as number;
+    col[i * 3 + 2] = c[2] as number;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.BufferAttribute(m.normals, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  g.setIndex(new THREE.BufferAttribute(m.indices, 1));
+  g.computeBoundingSphere();
+  return g;
+}
 
 /** Outline thickness as a fraction of a voxel. */
 const OUTLINE = 0.3;

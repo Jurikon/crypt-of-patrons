@@ -1358,3 +1358,18 @@ kbd {
   color: #a8e0a0;
   font-size: 11px;
 }
+
+.start-settings {
+  margin-top: 12px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  color: var(--ink-dim);
+  font-size: 12px;
+}
+
+.start-settings button {
+  font: inherit;
+  padding: 4px 10px;
+  cursor: pointer;
+}

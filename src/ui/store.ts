@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import type { RejectReason, GameState, MetaSave, Preview } from '../sim';
-import type { FrameLabels, Quality } from '../render/renderer';
+import type { FrameLabels, Quality, RenderStyle } from '../render/renderer';
 
 /** What the HTML layer shows. The game state here is read-only for the UI. */
 export interface ViewState {
@@ -22,6 +22,8 @@ export interface ViewState {
   readonly shownHp: number | null;
   /** Graphics quality (debug menu); remembered per browser. */
   readonly quality: Quality;
+  /** Graphics style: smooth or retro pixels (settings); remembered per browser. */
+  readonly style: RenderStyle;
   /** Where the selected ability is aimed (null for abilities without a choice of target). */
   readonly aim: { readonly x: number; readonly y: number } | null;
   /** Class choice (with "continue" when a saved run exists) or the game itself. */

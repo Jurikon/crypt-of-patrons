@@ -463,5 +463,9 @@
   "affix.shielded": "Shield-bearer",
   "affix.thorny": "Thorny",
   "reward.worksWith": "Works with your: {list}",
-  "reward.worksWithLater": "Works with abilities of your class you can still find"
+  "reward.worksWithLater": "Works with abilities of your class you can still find",
+  "settings.title": "Graphics",
+  "settings.style": "Style",
+  "settings.smooth": "Smooth",
+  "settings.retro": "Retro pixels"
 }

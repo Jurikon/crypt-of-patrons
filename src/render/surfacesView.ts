@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Vec2 } from '../core/grid';
 import { getSurface } from '../content';
+import { pixelTexture } from './look/textures';
 import type { GameState } from '../sim';
 import { CELL } from './dims';
 import { propGeometry } from './modelMesh';
@@ -8,6 +9,24 @@ import { toonMaterial } from './toon';
 import { PROPS } from './voxel/models';
 
 const key = (id: string, at: Vec2) => `${id}:${at.x},${at.y}`;
+
+const speckles = new Map<string, THREE.Texture>();
+/** A grey speckle texture per surface (tinted by the material colour): ripples, frost, clots, flames. */
+function speckle(id: string): THREE.Texture {
+  const known = speckles.get(id);
+  if (known) return known;
+  const seed = [...id].reduce((a, c) => a * 31 + c.charCodeAt(0), 7) >>> 0;
+  const t = pixelTexture(32, 32, seed, (g, r) => {
+    g.fillStyle = '#c8c8c8';
+    g.fillRect(0, 0, 32, 32);
+    for (let i = 0; i < 90; i++) {
+      g.fillStyle = r() < 0.5 ? '#ffffff' : '#8a8a8a';
+      g.fillRect(r() * 32, r() * 32, 0.5 + r() * 3, 0.5 + r() * 0.8);
+    }
+  });
+  speckles.set(id, t);
+  return t;
+}
 
 /** Looks of surfaces that are patches or volumes rather than voxel props. */
 const FLAT: Record<string, { color: number; opacity: number; glow?: boolean; volume?: number }> = {
@@ -89,7 +108,8 @@ export class SurfacesView {
     if (!look) return null;
     const g = new THREE.Group();
     const material = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(look.color).multiplyScalar(look.glow ? 1.8 : 1),
+      map: speckle(flow !== undefined ? 'current' : id),
+      color: new THREE.Color(look.color).multiplyScalar(look.glow ? 0.9 : 1),
       transparent: true,
       opacity: look.opacity,
       depthWrite: false,

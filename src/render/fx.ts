@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { FirePoint } from './voxel/cave';
+import type { FirePoint } from './look/rooms';
 
 /**
  * Particles: floating embers, brazier flames, lava splashes and voxel debris, all drawn as tiny cubes

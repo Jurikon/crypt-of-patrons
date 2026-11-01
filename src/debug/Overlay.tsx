@@ -12,6 +12,8 @@ export interface OverlayActions {
   /** Debug cheats go through the simulation as commands, so bug reports replay exactly. */
   cheat(action: DebugAction): void;
   toggleQuality(): void;
+  /** Smooth or retro pixels. */
+  toggleStyle(): void;
   /** Restart the room with another class. */
   setClass(classId: string): void;
   grantAbility(abilityId: string, slot: number): void;
@@ -89,6 +91,9 @@ export function DebugOverlay({ view, actions }: { view: ViewState; actions: Over
         </button>
       </div>
       <div class="debug-buttons">
+        <button type="button" onClick={actions.toggleStyle} data-testid="style">
+          {t('settings.style')}: {t(view.style === 'smooth' ? 'settings.smooth' : 'settings.retro')}
+        </button>
         <button type="button" onClick={actions.toggleQuality} data-testid="quality">
           {t('debug.quality')}: {t(view.quality === 'high' ? 'debug.qualityHigh' : 'debug.qualityLow')}
         </button>

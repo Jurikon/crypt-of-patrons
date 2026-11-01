@@ -3,7 +3,7 @@ import './style.css';
 import { formatHash, parseHash, randomSeed } from './debug/url';
 import { detectLang, setLang, t, type TextKey } from './i18n';
 import { attachInput } from './input/input';
-import { GameRenderer, type Quality } from './render/renderer';
+import { GameRenderer, type Quality, type RenderStyle } from './render/renderer';
 import type { Vec2 } from './core/grid';
 import { CLASSES, getAbility, getGift, getHybrid } from './content';
 import {
@@ -114,10 +114,22 @@ function savedQuality(): Quality | null {
   }
 }
 
+const STYLE_KEY = 'cop.style';
+/** Smooth or retro pixels (graphics settings); smooth unless the player chose otherwise. */
+function savedStyle(): RenderStyle {
+  try {
+    return localStorage.getItem(STYLE_KEY) === 'retro' ? 'retro' : 'smooth';
+  } catch {
+    return 'smooth';
+  }
+}
+
 let renderer: GameRenderer;
 let quality: Quality = savedQuality() ?? 'high';
+const style: RenderStyle = savedStyle();
 try {
   renderer = new GameRenderer(gameEl, quality);
+  renderer.setStyle(style);
   // No GPU (software rendering): start on low unless the player chose otherwise.
   if (!savedQuality() && renderer.isSoftwareRendered()) {
     quality = 'low';
@@ -144,6 +156,7 @@ const store = createStore<ViewState>({
   hitAt: -1e9,
   shownHp: null,
   quality,
+  style,
   aim: null,
   screen: params.seed !== null ? 'play' : 'start',
   canContinue: saved !== null && !runOver(saved.state),
@@ -407,6 +420,16 @@ const actions: AppActions = {
   reroll: () => dispatch({ type: 'reroll', playerId: PLAYER_ID }),
   jump: (act: number, depth: number) => dispatch({ type: 'debugJump', playerId: PLAYER_ID, act, depth }),
   addClass: (id: string) => dispatch({ type: 'debugClass', playerId: PLAYER_ID, classId: id }),
+  toggleStyle: () => {
+    const next: RenderStyle = store.get().style === 'smooth' ? 'retro' : 'smooth';
+    renderer.setStyle(next);
+    store.set({ style: next });
+    try {
+      localStorage.setItem(STYLE_KEY, next);
+    } catch {
+      // Storage blocked: the choice lasts for this session only.
+    }
+  },
   toggleQuality: () => {
     const quality: Quality = store.get().quality === 'high' ? 'low' : 'high';
     renderer.setQuality(quality);

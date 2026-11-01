@@ -8,6 +8,8 @@ export interface StartActions {
   continueRun(): void;
   /** Buy the next level of a Chapel upgrade with Ash. */
   buyPerk(id: string): void;
+  /** Graphics: smooth or retro pixels. */
+  toggleStyle(): void;
 }
 
 /** Run start: pick a class (GDD 2), or continue the saved run. */
@@ -16,11 +18,13 @@ export function StartScreen({
   canContinue,
   saveError,
   meta,
+  style,
 }: {
   actions: StartActions;
   canContinue: boolean;
   saveError: boolean;
   meta: MetaSave;
+  style: 'smooth' | 'retro';
 }) {
   return (
     <div class="start" data-testid="start-screen">
@@ -65,6 +69,12 @@ export function StartScreen({
         })}
       </div>
       <Chapel meta={meta} buy={actions.buyPerk} />
+      <div class="start-settings">
+        <span>{t('settings.title')}</span>
+        <button type="button" onClick={actions.toggleStyle} data-testid="start-style">
+          {t('settings.style')}: {t(style === 'smooth' ? 'settings.smooth' : 'settings.retro')}
+        </button>
+      </div>
     </div>
   );
 }

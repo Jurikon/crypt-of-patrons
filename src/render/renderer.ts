@@ -1,7 +1,9 @@
 import * as THREE from 'three';
+import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { createRng, fork, nextU32 } from '../core/rng';
 import { getCell, type Vec2 } from '../core/grid';
@@ -18,8 +20,9 @@ import {
   type Room,
 } from '../sim';
 import { CameraRig, cellCenter } from './cameraRig';
-import { lookOf } from './biomeLook';
-import { buildCaveMeshes, type CaveMeshes } from './caveMesh';
+import { HandsView } from './look/hands';
+import { buildRoom, roomLook, type RoomMeshes } from './look/rooms';
+import { setTextureStyle, type RenderStyle } from './look/textures';
 import { CELL, WALL_H } from './dims';
 import { Particles } from './fx';
 import { Highlights, type Highlight } from './highlights';
@@ -28,21 +31,20 @@ import { AltarView } from './altarView';
 import { DoorsView } from './doorsView';
 import type { RewardKind, RoomGoal } from '../content';
 import { UnitsView, type UnitVisual } from './unitsView';
-import { buildCave } from './voxel/cave';
 
 export type Quality = 'high' | 'low';
 
-// Look of the reference: warm fog, purple sky / maroon ground hemisphere light for hue-shifted
-// shadows, orange point lights from the torch, braziers and lava.
-const FOG_COLOR = 0x1a0705;
-const BACKGROUND = 0x140504;
-const FOG_DENSITY = 0.055;
-const HEMI_INTENSITY = 3;
-const TORCH_INTENSITY = 3.6;
-const BRAZIER_INTENSITY = 8;
-const LAVA_LIGHT_INTENSITY = 3;
-const BLOOM = { strength: 0.45, radius: 0.35, threshold: 0.8 };
-const MAX_PIXEL_RATIO = 2;
+// The MV look: stone lit by torches in the dark, fire that glows (bloom), the hero's own torch casting
+// shadows, a soft depth of field and a vignette; filmic tone mapping. Per-biome colours in look/rooms.
+const FOG_COLOR = 0x0c0806;
+const BACKGROUND = 0x0c0806;
+const HEMI_INTENSITY = 2.4;
+const TORCH_INTENSITY = 11;
+const BLOOM = { strength: 0.45, radius: 0.4, threshold: 0.88 };
+/** Retro pixels: the frame is rendered this many lines tall and scaled up without smoothing. */
+const RETRO_LINES = 400;
+export type { RenderStyle };
+const MAX_PIXEL_RATIO = 1.5;
 
 /** Fire-like flicker from a few incommensurate sines (no randomness, no state). */
 const flicker = (s: number, a: number, b: number) => 0.82 + 0.11 * Math.sin(s * a) + 0.07 * Math.sin(s * b + 1.3);
@@ -158,16 +160,23 @@ export class GameRenderer {
   private readonly camera = new THREE.PerspectiveCamera(70, 16 / 9, 0.05, 120);
   private readonly composer: EffectComposer;
   private readonly bloom: UnrealBloomPass;
-  private readonly fog = new THREE.FogExp2(FOG_COLOR, FOG_DENSITY);
+  private readonly fog = new THREE.FogExp2(FOG_COLOR, 0.06);
+  private fogDensity = 0.06;
+  private readonly bokeh: BokehPass;
+  private style: RenderStyle = 'smooth';
+  private flickerFrame = 0;
   private readonly hemi = new THREE.HemisphereLight(0x5a2a70, 0x501008, HEMI_INTENSITY);
   // Shallow falloff: bright enough across the room without blowing out walls at arm's length.
-  private readonly torch = new THREE.PointLight(0xffc890, TORCH_INTENSITY, 22, 0.6);
+  private readonly torch = new THREE.PointLight(0xffb070, TORCH_INTENSITY, 18, 1.1);
+  // A soft warm fill on what the hero holds, from the same torch.
+  private readonly handFill = new THREE.PointLight(0xffb070, 0.6, 1.2, 1);
   private readonly topLight = new THREE.AmbientLight(0xc8a890, 0);
   private readonly marker: THREE.Mesh;
   private readonly fx = new Particles();
   private readonly unitsView = new UnitsView(this.fx);
   private readonly highlights = new Highlights();
-  private room: CaveMeshes | null = null;
+  private readonly hands = new HandsView();
+  private room: RoomMeshes | null = null;
   private roomLights: { light: THREE.PointLight; base: number; a: number; b: number }[] = [];
   private rig: CameraRig | null = null;
   private currentRoom: Room | null = null;
@@ -198,14 +207,34 @@ export class GameRenderer {
   constructor(container: HTMLElement, quality: Quality = 'high') {
     this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.35;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.autoUpdate = false;
     this.canvas = this.renderer.domElement;
     this.canvas.className = 'game-canvas';
     container.appendChild(this.canvas);
 
-    this.composer = new EffectComposer(this.renderer);
+    // Multisampled, so edges are smooth in the smooth style.
+    this.composer = new EffectComposer(
+      this.renderer,
+      new THREE.WebGLRenderTarget(4, 4, { samples: 4, type: THREE.HalfFloatType }),
+    );
     this.composer.addPass(new RenderPass(this.scene, this.camera));
+    this.bokeh = new BokehPass(this.scene, this.camera, { focus: 6, aperture: 0.0012, maxblur: 0.005 });
+    this.composer.addPass(this.bokeh);
     this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), BLOOM.strength, BLOOM.radius, BLOOM.threshold);
     this.composer.addPass(this.bloom);
+    this.composer.addPass(
+      new ShaderPass({
+        uniforms: { tDiffuse: { value: null } },
+        vertexShader:
+          'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+        fragmentShader: `uniform sampler2D tDiffuse; varying vec2 vUv;
+          void main(){ vec4 c = texture2D(tDiffuse, vUv);
+          gl_FragColor = vec4(c.rgb * mix(0.55, 1.0, smoothstep(0.95, 0.3, length(vUv - 0.5))), c.a); }`,
+      }),
+    );
     this.composer.addPass(new OutputPass());
 
     this.scene.background = new THREE.Color(BACKGROUND);
@@ -221,8 +250,14 @@ export class GameRenderer {
       this.highlights.group,
       this.fx.group,
     );
-    this.camera.add(this.torch);
-    this.torch.position.set(0.6, 0.5, 0.3);
+    // The hero's torch: ahead and above, lighting what stands in front and throwing shadows back.
+    this.camera.add(this.torch, this.handFill, this.hands.group);
+    this.torch.position.set(0.2, 0.9, -2.2);
+    this.torch.castShadow = true;
+    this.torch.shadow.mapSize.set(256, 256);
+    // Shadows are redrawn every other frame (see render): a cube shadow map renders the scene six times.
+    this.torch.shadow.bias = -0.002;
+    this.handFill.position.set(-0.15, 0.15, -0.15);
 
     // Player marker, only visible from above.
     const markerGeo = new THREE.ConeGeometry(CELL * 0.28, CELL * 0.6, 3);
@@ -243,58 +278,54 @@ export class GameRenderer {
     return /swiftshader|llvmpipe|software|basic render/i.test(name);
   }
 
-  /** High: full pixel density (up to 2×), bloom and particles. Low: 1×, no bloom, no ambient particles. */
+  /** High: full pixel density (up to 2×), bloom, depth of field, shadows and particles. Low: 1×, none of those. */
   setQuality(q: Quality): void {
     this.quality = q;
     this.fx.enabled = q === 'high';
+    this.torch.castShadow = q === 'high';
     this.resize();
   }
 
-  /** Builds the voxel cave, its lights and particles for a new room. */
+  /** Builds the room in its biome's look, its torches and particles. */
   private buildRoom(state: GameState): void {
     if (this.room) {
       this.scene.remove(this.room.group);
       this.room.dispose();
     }
-    for (const l of this.roomLights) this.scene.remove(l.light);
     this.roomLights = [];
-
     const depth = state.run?.depth ?? 1;
     const act = state.run?.act ?? 1;
-    const caveSeed = nextU32(
+    const seed = nextU32(
       fork(createRng(state.seed), act > 1 ? `cave:a${act}:${depth}` : depth === 1 ? 'cave' : `cave:${depth}`),
     );
-    const cave = buildCave(state.room.grid, caveSeed);
-    const look = lookOf(biomeOf(state).id);
-    this.room = buildCaveMeshes(cave, look);
-    this.fog.color.setHex(look.fog);
-    (this.scene.background as THREE.Color).setHex(look.background);
-    this.hemi.color.setHex(look.hemiSky);
-    this.hemi.groundColor.setHex(look.hemiGround);
+    const look = roomLook(biomeOf(state).id);
+    this.room = buildRoom(state.room.grid, look, seed);
     this.scene.add(this.room.group);
-
-    // One light per door (between its two braziers) and per lava pool.
-    for (let i = 0; i + 1 < cave.braziers.length; i += 2) {
-      const a = cave.braziers[i] as (typeof cave.braziers)[number];
-      const b = cave.braziers[i + 1] as (typeof cave.braziers)[number];
-      const light = new THREE.PointLight(look.brazier, BRAZIER_INTENSITY, 12, 0.9);
-      light.position.set((a.x + b.x) / 2, a.y + 0.1, (a.z + b.z) / 2);
-      this.roomLights.push({ light, base: BRAZIER_INTENSITY, a: 9.1 + i, b: 23.7 - i });
-    }
-    for (const [i, pool] of cave.lavaPools.entries()) {
-      const base = LAVA_LIGHT_INTENSITY + Math.min(4, pool.cells) * 0.6;
-      const light = new THREE.PointLight(look.pool, base, 9, 0.9);
-      light.position.set(pool.x, 0.5, pool.z);
-      this.roomLights.push({ light, base, a: 3.1 + i * 0.4, b: 7.7 + i * 0.6 });
-    }
-    for (const l of this.roomLights) this.scene.add(l.light);
+    this.fog.color.setHex(look.fog);
+    this.fogDensity = look.fogDensity;
+    (this.scene.background as THREE.Color).setHex(look.fog);
+    this.hemi.color.setHex(look.ambient);
+    this.hemi.groundColor.setHex(look.ambientGround);
+    this.renderer.toneMappingExposure = look.exposure;
+    // Tall rooms (the cathedral) are focused further away.
+    (this.bokeh.uniforms as Record<string, THREE.IUniform>).focus!.value = look.height > 4 ? 7 : 5.5;
+    for (const [i, l] of this.room.lights.entries())
+      this.roomLights.push({ light: l.light, base: l.base, a: 9.1 + i, b: 23.7 - i * 0.7 });
 
     const g = state.room.grid;
     const open: THREE.Vector3[] = [];
     for (let y = 0; y < g.h; y++)
       for (let x = 0; x < g.w; x++)
         if (getCell(g, x, y) !== 'wall' && getCell(g, x, y) !== 'door') open.push(cellCenter({ x, y }));
-    this.fx.setRoom(open, CELL, cave.braziers);
+    this.fx.setRoom(open, CELL, this.room.torches);
+  }
+
+  /** Smooth (full resolution, smoothed edges and textures) or retro pixels (a low-resolution frame scaled up). */
+  setStyle(style: RenderStyle): void {
+    this.style = style;
+    setTextureStyle(style);
+    this.canvas.style.imageRendering = style === 'retro' ? 'pixelated' : 'auto';
+    this.resize();
   }
 
   /**
@@ -324,6 +355,7 @@ export class GameRenderer {
     this.surfacesView.sync(state);
     this.doorsView.sync(state);
     this.altarView.sync(state);
+    this.hands.setClass(player.classId);
     if (this.rig) this.rig.snap(state.room, player, now);
     else this.rig = new CameraRig(this.camera, state.room, player, now);
     this.rig.setRoom(state.room, this.topMargins());
@@ -403,7 +435,8 @@ export class GameRenderer {
     const parent = this.canvas.parentElement;
     this.cssW = parent?.clientWidth || window.innerWidth;
     this.cssH = parent?.clientHeight || window.innerHeight;
-    const ratio = this.quality === 'high' ? Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO) : 1;
+    const full = this.quality === 'high' ? Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO) : 1;
+    const ratio = this.style === 'retro' ? Math.min(full, RETRO_LINES / Math.max(1, this.cssH)) : full;
     this.renderer.setPixelRatio(ratio);
     this.renderer.setSize(this.cssW, this.cssH, false);
     this.composer.setPixelRatio(ratio);
@@ -462,6 +495,7 @@ export class GameRenderer {
         return 0;
       case 'abilityUsed':
         rig.onEvent(e, now);
+        if (isPlayer) this.hands.swing(now);
         this.strikes.push({ cells: [e.target], start: now });
         return EVENT_MS.abilityUsed ?? 0;
       case 'enemyAttack': {
@@ -717,19 +751,23 @@ export class GameRenderer {
     this.unitsView.update(now);
     this.camera.updateMatrixWorld();
     const top = rig.topBlend;
+    this.hands.update(now, top);
 
     const s = now / 1000;
     this.torch.intensity = TORCH_INTENSITY * (0.94 + 0.06 * flicker(s, 9.1, 23.7));
     for (const l of this.roomLights) l.light.intensity = l.base * flicker(s, l.a, l.b);
-    this.room.lavaMaterial.uniforms.uTime!.value = s;
+    if (++this.flickerFrame % 6 === 0) this.room.flicker();
+    if (this.flickerFrame % 2 === 0) this.renderer.shadowMap.needsUpdate = true;
     this.fx.update(now);
     this.doorsView.update(now);
     this.altarView.update(now);
     this.surfacesView.update(now);
 
     // Top view: clear the fog, lift the ambient light, drop the ceiling, show the player marker.
-    this.fog.density = FOG_DENSITY * (1 - top);
-    this.topLight.intensity = top * 2.5;
+    this.fog.density = this.fogDensity * (1 - top);
+    this.topLight.intensity = top * 4;
+    // Depth of field is for the first-person view only: from above everything should be sharp.
+    (this.bokeh.uniforms as Record<string, THREE.IUniform>).maxblur!.value = 0.005 * (1 - top);
     this.room.ceiling.visible = top < 0.02;
     this.marker.visible = top > 0.02;
     const p = rig.currentPos(now);
