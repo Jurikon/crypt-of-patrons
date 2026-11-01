@@ -758,13 +758,12 @@ const voice: CreatureSpec = {
     hand: { color: 0x2a2420, spots: 0x0a0806 },
     gold: { color: 0xd8a838, spots: 0x8a6a20, rough: 0.3, metal: 0.6 },
     halo: { color: 0xffd880, glow: true },
-    rag: { color: 0x6a5a40, stripes: true },
   },
   bones: { head: [0, 1.6, 0.02], armR: [0.28, 1.5, 0], armL: [-0.28, 1.5, 0] },
   parts: [
     // A floating priest in tattered vestments, its face a golden mask, a halo behind its head.
-    cyl('body', [0.19, 1.1, 0.42], [0, 0.85, 0], 'robe'),
-    ...[-0.3, -0.1, 0.1, 0.3].map((x) => box('body', [0.12, 0.4, 0.02], [x, 0.22, 0.3 - Math.abs(x) * 0.3], 'rag')),
+    cyl('body', [0.19, 1.25, 0.44], [0, 0.78, 0], 'robe'),
+    cyl('body', [0.45, 0.06, 0.47], [0, 0.17, 0], 'trim'),
     cyl('body', [0.22, 0.45, 0.19], [0, 1.38, 0], 'robe'),
     box('body', [0.1, 0.9, 0.01], [0, 1.0, 0.26], 'trim', [-0.15, 0, 0]),
     sph('head', [0.16, 0.18, 0.16], [0, 0.14, -0.02], 'robe'),

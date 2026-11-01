@@ -393,6 +393,131 @@ export function buildRoom(grid: Grid, look: RoomLook, seed: number): RoomMeshes 
       }
   }
 
+  // ---- things on the floor along the walls (MV2): bones and rubble in the crypt, broken pots in the
+  // catacombs, fallen masonry and candles in the cathedral; barrels and crates in corners. Kept low and
+  // against the wall, clear of where creatures stand.
+  {
+    const boneM = std(solid(0xd8ccae, 81, 0x8a7a5a), 0xffffff, 0.8);
+    const woodM = std(planks(0x5a3a1e, 82), 0xffffff, 0.85);
+    const clayM = std(solid(0x8a5a3a, 83, 0x4a2a18), 0xffffff, 0.9);
+    const waxM = std(solid(0xd8d0b0, 84, 0xa89870), 0xffffff, 0.7);
+    const pageM = std(solid(0xc8bca0, 85, 0x6a5a40, true), 0xffffff, 0.9);
+    const flameM = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.2, 1.1, 0.35) });
+    disposables.push(flameM);
+    const flat = (g: THREE.BufferGeometry, rx: number, rz: number) => g.rotateX(rx).rotateZ(rz);
+
+    const bones = (x: number, z: number) => {
+      for (let i = 0; i < 3; i++)
+        put(
+          boneM,
+          placed(
+            flat(new THREE.CylinderGeometry(0.022, 0.026, 0.3 + r() * 0.15, 6), Math.PI / 2, 0),
+            x + (r() - 0.5) * 0.4,
+            0.03,
+            z + (r() - 0.5) * 0.4,
+            r() * Math.PI,
+          ),
+        );
+      if (r() < 0.6) put(boneM, placed(new THREE.SphereGeometry(0.1, 8, 6).scale(1, 0.9, 1.1), x, 0.09, z, r() * 6));
+    };
+    const rubble = (x: number, z: number) => {
+      for (let i = 0; i < 4; i++) {
+        const size = 0.06 + r() * 0.12;
+        put(
+          trimM,
+          placed(
+            new THREE.DodecahedronGeometry(size, 0),
+            x + (r() - 0.5) * 0.6,
+            size * 0.6,
+            z + (r() - 0.5) * 0.5,
+            r() * 6,
+          ),
+        );
+      }
+    };
+    const candles = (x: number, z: number) => {
+      for (let i = 0; i < 3; i++) {
+        const h = 0.08 + r() * 0.18;
+        const cx = x + (r() - 0.5) * 0.3;
+        const cz = z + (r() - 0.5) * 0.3;
+        put(waxM, placed(new THREE.CylinderGeometry(0.03, 0.035, h, 8), cx, h / 2, cz));
+        put(flameM, placed(new THREE.ConeGeometry(0.018, 0.06, 6), cx, h + 0.035, cz));
+      }
+    };
+    const pots = (x: number, z: number) => {
+      put(clayM, placed(new THREE.CylinderGeometry(0.1, 0.13, 0.32, 10), x, 0.16, z));
+      if (r() < 0.7)
+        for (let i = 0; i < 3; i++)
+          put(
+            clayM,
+            placed(
+              flat(new THREE.BoxGeometry(0.1, 0.12, 0.015), 1.3, r()),
+              x + 0.2 + r() * 0.2,
+              0.02,
+              z + (r() - 0.5) * 0.4,
+              r() * 6,
+            ),
+          );
+    };
+    const masonry = (x: number, z: number) => {
+      put(trimM, placed(new THREE.BoxGeometry(0.45, 0.24, 0.3), x, 0.12, z, r() * 0.8));
+      if (r() < 0.6) put(trimM, placed(new THREE.BoxGeometry(0.3, 0.18, 0.22), x + 0.3, 0.09, z + 0.1, r() * 2));
+    };
+    const pew = (x: number, z: number) => {
+      put(woodM, placed(flat(new THREE.BoxGeometry(0.9, 0.05, 0.28), 0, 0.12), x, 0.08, z, r() * 0.6));
+      put(woodM, placed(new THREE.BoxGeometry(0.06, 0.2, 0.26), x + 0.3, 0.1, z, r() * 0.6));
+    };
+    const pages = (x: number, z: number) => {
+      for (let i = 0; i < 4; i++)
+        put(
+          pageM,
+          placed(
+            flat(new THREE.PlaneGeometry(0.16, 0.22), -Math.PI / 2, 0),
+            x + (r() - 0.5) * 0.6,
+            0.006 + i * 0.001,
+            z + (r() - 0.5) * 0.5,
+            r() * 6,
+          ),
+        );
+    };
+    const kinds =
+      look.decor === 'niches'
+        ? [bones, bones, rubble, candles]
+        : look.decor === 'chains'
+          ? [rubble, pots, pots, bones]
+          : [masonry, candles, pew, pages];
+
+    for (const f of faces) {
+      const [cx, cy] = f.cell;
+      if (cell(cx, cy) !== 'floor' || r() > 0.22) continue;
+      // Along the wall, a little off the middle of the face.
+      const along = (r() - 0.5) * 1.1;
+      const x = f.at.x + f.nx * 0.32 + -f.nz * along;
+      const z = f.at.z + f.nz * 0.32 + f.nx * along;
+      kinds[Math.floor(r() * kinds.length)]!(x, z);
+    }
+
+    // Corners: a barrel or a stack of crates.
+    for (let y = 0; y < grid.h; y++)
+      for (let x = 0; x < grid.w; x++) {
+        if (cell(x, y) !== 'floor' || r() > 0.3) continue;
+        const wx = cell(x - 1, y) === 'wall' ? -1 : cell(x + 1, y) === 'wall' ? 1 : 0;
+        const wz = cell(x, y - 1) === 'wall' ? -1 : cell(x, y + 1) === 'wall' ? 1 : 0;
+        if (!wx || !wz) continue;
+        const c = centre(x, y);
+        const px = c.x + wx * 0.68;
+        const pz = c.z + wz * 0.68;
+        if (r() < 0.5) {
+          put(woodM, placed(new THREE.CylinderGeometry(0.24, 0.24, 0.62, 12), px, 0.31, pz));
+          put(trimM, placed(new THREE.CylinderGeometry(0.25, 0.25, 0.04, 12), px, 0.5, pz));
+          put(trimM, placed(new THREE.CylinderGeometry(0.25, 0.25, 0.04, 12), px, 0.12, pz));
+        } else {
+          put(woodM, placed(new THREE.BoxGeometry(0.46, 0.46, 0.46), px, 0.23, pz, r() * 0.4));
+          if (r() < 0.5) put(woodM, placed(new THREE.BoxGeometry(0.34, 0.34, 0.34), px, 0.63, pz, r()));
+        }
+      }
+  }
+
   // ---- merge buckets ----
   const merge = (b: Map<THREE.Material, THREE.BufferGeometry[]>, into: THREE.Group) => {
     for (const [m, list] of b) {
