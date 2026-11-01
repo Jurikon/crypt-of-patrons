@@ -364,7 +364,7 @@ export interface SummonDef {
   readonly nameKey: string;
   readonly maxHp: number;
   readonly damage: number;
-  /** Which voxel model the renderer draws. */
+  /** Which creature model the renderer draws (render/look/creatureKit). */
   readonly model: string;
   readonly tags: readonly Tag[];
   /** Does not act (walls, decoys): it only takes up space and draws attacks. */
@@ -434,7 +434,7 @@ export interface EnemyDef {
   /** A boss: one per boss room, never in ordinary encounters. */
   readonly boss?: boolean;
   readonly behavior: EnemyBehavior;
-  /** Which voxel model the renderer draws. */
+  /** Which creature model the renderer draws (render/look/creatureKit). */
   readonly model: string;
   /** Relative spawn frequency in encounters (within its biomes). */
   readonly weight: number;

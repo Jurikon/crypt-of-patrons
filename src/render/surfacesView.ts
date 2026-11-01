@@ -4,9 +4,8 @@ import { getSurface } from '../content';
 import { pixelTexture } from './look/textures';
 import type { GameState } from '../sim';
 import { CELL } from './dims';
-import { propGeometry } from './modelMesh';
-import { toonMaterial } from './toon';
-import { PROPS } from './voxel/models';
+import { PROPS } from './look/creatureKit';
+import { buildProp } from './look/creatures';
 
 const key = (id: string, at: Vec2) => `${id}:${at.x},${at.y}`;
 
@@ -28,7 +27,7 @@ function speckle(id: string): THREE.Texture {
   return t;
 }
 
-/** Looks of surfaces that are patches or volumes rather than voxel props. */
+/** Looks of surfaces that are patches or volumes rather than props. */
 const FLAT: Record<string, { color: number; opacity: number; glow?: boolean; volume?: number }> = {
   fire: { color: 0xff6a10, opacity: 0.7, glow: true },
   ice: { color: 0xcfeeff, opacity: 0.55 },
@@ -39,14 +38,11 @@ const FLAT: Record<string, { color: number; opacity: number; glow?: boolean; vol
   holyFire: { color: 0xfff0b0, opacity: 0.9, glow: true },
   current: { color: 0x2a8aa8, opacity: 0.55 },
 };
-const outline = new THREE.MeshBasicMaterial({ color: 0x2a0a08, side: THREE.BackSide });
-const glow = new THREE.MeshBasicMaterial({ vertexColors: true });
 
-/** Corpses, traps and other things lying on floor cells, drawn as small voxel props. */
+/** Corpses, traps and other things lying on floor cells, drawn as small props. */
 export class SurfacesView {
   readonly group = new THREE.Group();
   private readonly items = new Map<string, THREE.Group>();
-  private readonly material = toonMaterial();
   private readonly plane = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
   private readonly box = new THREE.BoxGeometry(1, 1, 1);
   private readonly arrow = new THREE.ShapeGeometry(
@@ -90,10 +86,8 @@ export class SurfacesView {
       this.items.set(k, flat);
       return;
     }
-    const geo = propGeometry(prop);
-    const g = new THREE.Group();
-    g.add(new THREE.Mesh(geo.mesh, this.material), new THREE.Mesh(geo.outline, outline));
-    if (geo.glow) g.add(new THREE.Mesh(geo.glow, glow));
+    const { group: g, materials } = buildProp(id, prop);
+    g.userData.materials = materials;
     // A little seeded variety so every corpse does not lie the same way.
     g.rotation.y = ((at.x * 7 + at.y * 13) % 4) * (Math.PI / 2) + ((at.x * 3 + at.y) % 3) * 0.3;
     g.position.set((at.x + 0.5) * CELL, 0.005, (at.y + 0.5) * CELL);
@@ -101,7 +95,7 @@ export class SurfacesView {
     this.items.set(k, g);
   }
 
-  /** Surfaces without a voxel prop: a glowing or tinted patch, or a volume of smoke or gas. */
+  /** Surfaces without a prop: a glowing or tinted patch, or a volume of smoke or gas. */
   private flat(id: string): THREE.Group | null {
     const flow = getSurface(id).flow;
     const look = FLAT[flow !== undefined ? 'current' : id];
@@ -156,6 +150,7 @@ export class SurfacesView {
     this.group.remove(g);
     this.items.delete(k);
     (g.userData.material as THREE.Material | undefined)?.dispose();
+    for (const m of (g.userData.materials as THREE.Material[] | undefined) ?? []) m.dispose();
   }
 
   clear(): void {
@@ -164,7 +159,6 @@ export class SurfacesView {
 
   dispose(): void {
     this.clear();
-    this.material.dispose();
     this.plane.dispose();
     this.box.dispose();
     this.arrow.dispose();

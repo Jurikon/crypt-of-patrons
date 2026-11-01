@@ -354,15 +354,25 @@ export class GameRenderer {
     const dir = this.camera.getWorldDirection(this.tmpB).setY(0);
     if (dir.lengthSq() < 1e-6) return;
     dir.normalize();
+    // A creature in the way stops the torch short too (without dimming it), so it lights the creature's
+    // front instead of hanging over its head.
+    const creatures = new Set<string>();
+    for (const u of this.unitsView.units.values()) if (!u.isPlayer && u.alive) creatures.add(`${u.cell.x},${u.cell.y}`);
+    const own = `${Math.floor(from.x / CELL)},${Math.floor(from.z / CELL)}`;
     let free = TORCH_REACH;
+    let toCreature = TORCH_REACH;
     for (let d = 0.1; d <= free; d += 0.1) {
-      const cell = getCell(g, Math.floor((from.x + dir.x * d) / CELL), Math.floor((from.z + dir.z * d) / CELL));
+      const x = Math.floor((from.x + dir.x * d) / CELL);
+      const y = Math.floor((from.z + dir.z * d) / CELL);
+      const cell = getCell(g, x, y);
       if (cell === 'wall' || cell === 'door' || cell === 'pillar') {
         free = d;
         break;
       }
+      const k = `${x},${y}`;
+      if (toCreature === TORCH_REACH && k !== own && creatures.has(k)) toCreature = d;
     }
-    this.torchAhead += (torchAheadFor(free) - this.torchAhead) * 0.25;
+    this.torchAhead += (torchAheadFor(free, toCreature) - this.torchAhead) * 0.25;
     this.torch.position.z = -this.torchAhead;
     this.torch.intensity *= torchDimming(free - this.torchAhead);
   }

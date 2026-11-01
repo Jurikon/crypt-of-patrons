@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { FirePoint } from './look/rooms';
 
 /**
- * Particles: floating embers, brazier flames, lava splashes and voxel debris, all drawn as tiny cubes
+ * Particles: floating embers, brazier flames, lava splashes and dust, all drawn as tiny cubes
  * in one instanced mesh. Colours above 1 glow through the bloom pass. Purely cosmetic, so it may use
  * Math.random.
  */
@@ -143,28 +143,23 @@ export class Particles {
     }
   }
 
-  /** Voxels flying apart from a shattered model. Positions and colours are in world space. */
-  shatter(
-    voxels: { pos: THREE.Vector3; color: THREE.Color }[],
-    size: number,
-    centre: THREE.Vector3,
-    now: number,
-  ): void {
-    for (const v of voxels) {
-      const out = v.pos.clone().sub(centre).setY(0);
-      const len = out.length() || 1;
-      const s = 0.5 + Math.random() * 1.5;
+  /** A puff of dust and bone chips where a creature falls apart. */
+  dust(at: THREE.Vector3, now: number, count = 26): void {
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = 0.3 + Math.random() * 1.2;
+      const k = 0.35 + Math.random() * 0.3;
       this.bits.push({
-        x: v.pos.x,
-        y: v.pos.y,
-        z: v.pos.z,
-        vx: (out.x / len) * s + (Math.random() - 0.5) * 0.6,
-        vy: 0.5 + Math.random() * 2.2,
-        vz: (out.z / len) * s + (Math.random() - 0.5) * 0.6,
+        x: at.x + Math.cos(a) * 0.2,
+        y: at.y + Math.random() * 0.8,
+        z: at.z + Math.sin(a) * 0.2,
+        vx: Math.cos(a) * s,
+        vy: 0.4 + Math.random() * 1.6,
+        vz: Math.sin(a) * s,
         start: now,
-        dur: 1100 + Math.random() * 700,
-        size,
-        color: v.color.clone(),
+        dur: 700 + Math.random() * 600,
+        size: 0.03 + Math.random() * 0.04,
+        color: new THREE.Color(k, k * 0.9, k * 0.75),
         floor: 0,
         gravity: GRAVITY,
       });

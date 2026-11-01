@@ -13,9 +13,12 @@ const TORCH_WALL_GAP = 2.2;
 export const TORCH_REACH = TORCH_AHEAD + TORCH_WALL_GAP;
 const TORCH_MIN_AHEAD = 0.8;
 
-/** Where the hero's torch wants to hang, given the free distance to the wall ahead. */
-export function torchAheadFor(free: number): number {
-  return Math.max(TORCH_MIN_AHEAD, Math.min(TORCH_AHEAD, free - TORCH_WALL_GAP));
+/** How far short of a creature ahead the torch stops, so it lights the creature's face. */
+const TORCH_CREATURE_GAP = 1.4;
+
+/** Where the hero's torch wants to hang, given the free distance to the wall and to a creature ahead. */
+export function torchAheadFor(free: number, toCreature = Infinity): number {
+  return Math.max(TORCH_MIN_AHEAD, Math.min(TORCH_AHEAD, free - TORCH_WALL_GAP, toCreature - TORCH_CREATURE_GAP));
 }
 
 /** How much the torch dims with the wall `gap` away from it, so the lit spot never burns white. */

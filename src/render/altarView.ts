@@ -3,7 +3,7 @@ import { getCell } from '../core/grid';
 import { getPatron } from '../content';
 import type { GameState } from '../sim';
 import { CELL } from './dims';
-import { toonMaterial } from './toon';
+import { bricks } from './look/textures';
 
 /** The floor cell closest to the middle of the room: where the altar stands. */
 function centreCell(state: GameState): { x: number; y: number } {
@@ -33,7 +33,10 @@ export class AltarView {
   private readonly ring = new THREE.RingGeometry(0.55, 0.78, 40).rotateX(-Math.PI / 2);
   private readonly inner = new THREE.CircleGeometry(0.42, 6).rotateX(-Math.PI / 2);
   private readonly stone = new THREE.CylinderGeometry(0.22, 0.3, 0.32, 6);
-  private readonly stoneMaterial = toonMaterial({ vertexColors: false, color: 0x5a524c });
+  private readonly stoneMaterial = new THREE.MeshStandardMaterial({
+    map: bricks(0x6a6258, 0x2a2420, 401),
+    roughness: 0.9,
+  });
   private glow: THREE.MeshBasicMaterial | null = null;
   private lit = false;
   private shownKey = '';
