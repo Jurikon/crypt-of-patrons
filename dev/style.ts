@@ -1343,7 +1343,7 @@ if (hybrid) {
       }
     });
     addDust();
-    bokeh!.uniforms && ((bokeh!.uniforms as Record<string, THREE.IUniform>).focus!.value = b === 'cathedral' ? 7 : 5.5);
+    (bokeh!.uniforms as Record<string, THREE.IUniform>).focus!.value = b === 'cathedral' ? 7 : 5.5;
   };
   build(biome);
 }
