@@ -1,4 +1,10 @@
 import * as THREE from 'three';
+import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 
 /**
  * Style test (owner request): the retro PS1 / King's Field direction, before the game is restyled.
@@ -17,9 +23,15 @@ let biome = (params.get('biome') as Biome | null) ?? 'crypt';
 const still = params.has('still');
 const mini = params.get('style') === 'mini';
 const top = params.get('view') === 'top';
+/**
+ * ?style=hybrid — version 2's places and creatures with the HD-2D treatment: physically lit materials,
+ * the hero's torch casting shadows, glowing fire, a soft depth of field, dust in the light, a vignette,
+ * all rendered at the pixel resolution and scaled up crisp.
+ */
+const hybrid = params.get('style') === 'hybrid';
 
 /** Internal render height: higher = finer pixels. */
-const LOW_H = Number(params.get('px') ?? (mini ? window.innerHeight : 480));
+const LOW_H = Number(params.get('px') ?? (mini ? window.innerHeight : hybrid ? 540 : 480));
 /** Texture detail: texels per brick edge and so on. */
 const TEX = 2;
 
@@ -289,6 +301,8 @@ function mat(map: THREE.Texture, extra: THREE.MeshLambertMaterialParameters = {}
   // Miniatures: matte painted plastic under a lamp, no vertex wobble.
   if (mini)
     return new THREE.MeshStandardMaterial({ map, roughness: 0.78, metalness: 0, side: extra.side ?? THREE.FrontSide });
+  if (hybrid)
+    return new THREE.MeshStandardMaterial({ map, roughness: 0.88, metalness: 0, side: extra.side ?? THREE.FrontSide });
   const m = new THREE.MeshLambertMaterial({ map, ...extra });
   m.onBeforeCompile = (shader) => {
     shader.uniforms.uSnap = { value: snapRes };
@@ -314,7 +328,11 @@ const canvas = document.createElement('canvas');
 document.body.prepend(canvas);
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
 renderer.setPixelRatio(1);
-renderer.shadowMap.enabled = mini;
+renderer.shadowMap.enabled = mini || hybrid;
+if (hybrid) {
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.35;
+}
 renderer.shadowMap.type = THREE.PCFShadowMap;
 // The model has no ceiling: everything above this height is cut away.
 renderer.clippingPlanes = mini ? [new THREE.Plane(new THREE.Vector3(0, -1, 0), 2.7)] : [];
@@ -420,7 +438,13 @@ function torch(x: number, y: number, z: number, ry: number, color = 0xffa850) {
   g.add(stick);
   const flame = flameTexture(Math.floor(x * 13 + z * 7));
   flames.push(flame);
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: flame.texture, fog: false }));
+  const sprite = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: flame.texture,
+      fog: false,
+      color: hybrid ? new THREE.Color(2.6, 2.1, 1.6) : 0xffffff,
+    }),
+  );
   sprite.scale.set(0.32, 0.64, 1);
   sprite.position.set(0, 0.7, 0.5);
   g.add(sprite);
@@ -434,7 +458,13 @@ function candle(x: number, z: number, h: number, y0 = 0) {
   add(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, h, 6), wax), x, y0 + h / 2, z);
   const flame = flameTexture(Math.floor(x * 31 + z * 17), '#ffffd0', '#ffd060', '#ff9030');
   flames.push(flame);
-  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: flame.texture, fog: false }));
+  const s = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: flame.texture,
+      fog: false,
+      color: hybrid ? new THREE.Color(2.6, 2.2, 1.7) : 0xffffff,
+    }),
+  );
   s.scale.set(0.1, 0.2, 1);
   add(s, x, y0 + h + 0.09, z);
 }
@@ -1167,7 +1197,9 @@ const CENTERS: Record<Biome, { center: THREE.Vector3; size: number; cam: THREE.V
   cathedral: { center: new THREE.Vector3(0, 0, -8), size: 24, cam: new THREE.Vector3(0, 15, 6) },
 };
 
-function build(b: Biome) {
+let composerResize: ((w: number, h: number) => void) | null = null;
+
+let build = function build(b: Biome) {
   world.clear();
   lights.length = 0;
   flames.length = 0;
@@ -1202,7 +1234,7 @@ function build(b: Biome) {
   }
   yaw = b === 'catacombs' ? -0.12 : 0;
   pitch = b === 'cathedral' ? 0.06 : -0.03;
-}
+};
 
 let dragging = false;
 canvas.addEventListener('pointerdown', () => (dragging = true));
@@ -1224,8 +1256,11 @@ window.addEventListener('keydown', (e) => {
 function resize() {
   const w = window.innerWidth;
   const h = window.innerHeight;
-  renderer.setSize(w, h, false);
   const lowW = Math.round((LOW_H * w) / h);
+  // Hybrid: the whole chain runs at the pixel resolution and the canvas is scaled up by CSS.
+  if (hybrid) renderer.setSize(lowW, LOW_H, false);
+  else renderer.setSize(w, h, false);
+  composerResize?.(lowW, LOW_H);
   target.setSize(lowW, LOW_H);
   (post.material as THREE.ShaderMaterial).uniforms.uRes!.value.set(lowW, LOW_H);
   // Vertex wobble at a coarser grid than the pixels, so it still reads at high resolution.
@@ -1236,6 +1271,82 @@ function resize() {
 window.addEventListener('resize', resize);
 resize();
 build(biome);
+
+// The hybrid look: the scene goes through bloom, a soft depth of field and a vignette at the pixel
+// resolution; the canvas is then shown scaled up without smoothing.
+const composer = hybrid ? new EffectComposer(renderer) : null;
+const bokeh = hybrid ? new BokehPass(scene, camera, { focus: 5.5, aperture: 0.0012, maxblur: 0.005 }) : null;
+if (composer && bokeh) {
+  composer.addPass(new RenderPass(scene, camera));
+  composer.addPass(bokeh);
+  composer.addPass(new UnrealBloomPass(new THREE.Vector2(256, 256), 0.7, 0.45, 0.85));
+  composer.addPass(
+    new ShaderPass({
+      uniforms: { tDiffuse: { value: null } },
+      vertexShader:
+        'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+      fragmentShader: `uniform sampler2D tDiffuse; varying vec2 vUv;
+        void main(){ vec4 c = texture2D(tDiffuse, vUv);
+        gl_FragColor = vec4(c.rgb * mix(0.55, 1.0, smoothstep(0.95, 0.3, length(vUv - 0.5))), c.a); }`,
+    }),
+  );
+  composer.addPass(new OutputPass());
+  canvas.style.imageRendering = 'pixelated';
+  composerResize = (w, h) => composer.setSize(w, h);
+  resize();
+}
+// The torch in the hero's hand lights what stands in front and throws its shadows back.
+const handTorch = new THREE.PointLight(0xffb070, hybrid ? 6 : 0, 12, 1.2);
+handTorch.position.set(-0.7, 0.55, -1.5);
+handTorch.castShadow = hybrid;
+handTorch.shadow.mapSize.set(512, 512);
+handTorch.shadow.bias = -0.002;
+camera.add(handTorch);
+// A soft warm fill on the hands themselves, from the same torch, so the shield is not a black slab.
+const handFill = new THREE.PointLight(0xffb070, hybrid ? 0.5 : 0, 1.6, 1);
+handFill.position.set(-0.2, 0.1, 0.1);
+camera.add(handFill);
+let dust: THREE.Points | null = null;
+function addDust() {
+  const n = 220;
+  const pos = new Float32Array(n * 3);
+  const r = mulberry(5);
+  for (let i = 0; i < n; i++) {
+    pos[i * 3] = camera.position.x + (r() - 0.5) * 7;
+    pos[i * 3 + 1] = r() * 3;
+    pos[i * 3 + 2] = camera.position.z - 0.5 - r() * 9;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  dust = new THREE.Points(
+    geo,
+    new THREE.PointsMaterial({
+      color: new THREE.Color(1.4, 1.15, 0.8),
+      size: 0.018,
+      transparent: true,
+      opacity: 0.5,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    }),
+  );
+  world.add(dust);
+}
+if (hybrid) {
+  // Shadows from the hero's torch; dust over the first few metres.
+  const rebuild = build;
+  build = (b: Biome) => {
+    rebuild(b);
+    world.traverse((o) => {
+      if (o instanceof THREE.Mesh) {
+        o.castShadow = !(o.geometry instanceof THREE.PlaneGeometry);
+        o.receiveShadow = true;
+      }
+    });
+    addDust();
+    bokeh!.uniforms && ((bokeh!.uniforms as Record<string, THREE.IUniform>).focus!.value = b === 'cathedral' ? 7 : 5.5);
+  };
+  build(biome);
+}
 
 let frame = 0;
 function loop(now: number) {
@@ -1257,10 +1368,20 @@ function loop(now: number) {
   right.rotation.x = 0.1 - chop * 1.3;
   right.position.y = -0.32 + chop * 0.12 + (still ? 0 : Math.sin(now / 600) * 0.01);
   left.position.y = -0.42 + (still ? 0 : Math.sin(now / 600 + 1) * 0.01);
-  renderer.setRenderTarget(target);
-  renderer.render(scene, camera);
-  renderer.setRenderTarget(null);
-  renderer.render(postScene, postCam);
+  if (dust && !still) {
+    const a = dust.geometry.getAttribute('position') as THREE.BufferAttribute;
+    for (let i = 0; i < a.count; i++) a.setY(i, (a.getY(i) + 0.0025) % 3);
+    a.needsUpdate = true;
+  }
+  if (composer) {
+    handTorch.intensity = 6 * (0.9 + 0.07 * Math.sin(t / 80) + 0.03 * Math.sin(t / 31));
+    composer.render();
+  } else {
+    renderer.setRenderTarget(target);
+    renderer.render(scene, camera);
+    renderer.setRenderTarget(null);
+    renderer.render(postScene, postCam);
+  }
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
