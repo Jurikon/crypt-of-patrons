@@ -255,6 +255,8 @@ export interface TriggerDef {
   readonly backstab?: boolean;
   /** Only once per turn. */
   readonly oncePerTurn?: boolean;
+  /** Fires only on every n-th matching event (every third blow); counted per rule over the run. */
+  readonly every?: number;
   /** The owner holds at least this much of a status (counters built from stacking statuses). */
   readonly ownerStatusAtLeast?: { readonly status: string; readonly amount: number };
   /** The subject stood on this surface. */

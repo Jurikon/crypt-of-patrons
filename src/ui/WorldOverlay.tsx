@@ -51,7 +51,9 @@ export function WorldOverlay({ store }: { store: LabelsStore }) {
         labels.units.map((u) =>
           u.head.onScreen || u.ally ? null : <EdgeArrow key={u.id} u={u} w={width} h={height} />,
         )}
-      {labels.doors.map((d, i) => (d.at.onScreen ? <DoorTag key={`door${i}`} d={d} /> : null))}
+      {labels.doors.map((d, i) =>
+        d.at.onScreen ? <DoorTag key={`door${i}`} d={d} hint={labels.topView > 0.5} /> : null,
+      )}
       {labels.cells.map((c, i) =>
         c.at.onScreen ? (
           <div key={i} class={`cell-label cell-${c.kind}`} style={{ left: `${c.at.x}px`, top: `${c.at.y}px` }}>
@@ -125,7 +127,8 @@ function EdgeArrow({ u, w, h }: { u: LabelUnit; w: number; h: number }) {
 }
 
 /** An altar door shows its patron's sign, name and colour: "Altar of Morra". */
-function DoorTag({ d }: { d: DoorLabel }) {
+/** In top view the tag also says what the reward is. */
+function DoorTag({ d, hint }: { d: DoorLabel; hint: boolean }) {
   const patron = d.patron ? getPatron(d.patron) : null;
   return (
     <div
@@ -139,6 +142,7 @@ function DoorTag({ d }: { d: DoorLabel }) {
     >
       <span class="door-icon">{patron ? patron.icon : DOOR_ICONS[d.reward]}</span>
       {patron ? t('door.altar', { patron: t(`${patron.nameKey}.gen` as TextKey) }) : t(`door.${d.reward}` as TextKey)}
+      {hint && <div class="door-hint">{t(`door.${d.reward}.hint` as TextKey)}</div>}
     </div>
   );
 }

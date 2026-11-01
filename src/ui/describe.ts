@@ -5,6 +5,8 @@ import {
   type AbilityDef,
   type EffectSpec,
   type RuleDef,
+  type StatusDef,
+  type SurfaceDef,
   type TargetSpec,
   type TriggerDef,
   type UnitSelector,
@@ -59,6 +61,8 @@ function describeEffects(effects: readonly EffectSpec[]): string {
 export function describeEffect(e: EffectSpec): string {
   switch (e.kind) {
     case 'damage':
+      if (e.fromStatus)
+        return withWho(t('effect.damageFromStatus', { status: name(getStatus(e.fromStatus).nameKey) }), e.to);
       return withWho(t('effect.damage', { n: e.amount }), e.to);
     case 'push':
       return withWho(t('effect.push', { n: e.distance }), e.to);
@@ -173,6 +177,7 @@ function describeTrigger(tr: TriggerDef): string {
     when += ` ${t('desc.ownerStatusAtLeast', { status: name(getStatus(tr.ownerStatusAtLeast.status).nameKey), n: tr.ownerStatusAtLeast.amount })}`;
   if (tr.oncePerRoom) when += ` ${t('desc.oncePerRoom')}`;
   if (tr.oncePerTurn) when += ` ${t('desc.oncePerTurn')}`;
+  if (tr.every) when += t('desc.every', { n: tr.every });
   const effects = describeEffects(tr.effects);
   // Lightning or fire damage says so: other rules react to those tags.
   const kind = tr.effectTags?.length ? ` (${tr.effectTags.map((tag) => t(`tag.${tag}` as TextKey)).join(', ')})` : '';
@@ -189,3 +194,108 @@ export function describeRule(r: RuleDef): string {
   // Phrases may already end in a full stop ("for 3 turns."); do not double it.
   return parts.map((p, i) => (i < parts.length - 1 ? p.replace(/\.$/, '') : p)).join('. ');
 }
+
+/** What a status does, from its data: its stats, its triggers and its special flags. */
+export function describeStatus(st: StatusDef): string {
+  const flags = (['stun', 'rooted', 'blind', 'taunt', 'shield', 'frontGuard', 'stacks', 'jumps'] as const)
+    .filter((f) => st[f])
+    .map((f) => t(`flag.${f}` as TextKey));
+  const parts = [
+    ...flags,
+    ...st.stats.map((x) => t(`stat.${x.stat}` as TextKey, { n: x.add, x: x.add + 1 })),
+    ...st.triggers.map(describeTrigger),
+    ...(st.onExpire ? [`${t('desc.onExpire')}: ${describeEffects(st.onExpire)}`] : []),
+  ];
+  return capital(parts.length ? sentences(parts) : t('flag.marker'));
+}
+
+/** Phrases joined into sentences, without doubling a full stop that ends one ("3 turns."). */
+const sentences = (parts: readonly string[]) =>
+  parts.map((p, i) => (i < parts.length - 1 ? p.replace(/\.$/, '') : p)).join('. ');
+
+/**
+ * A surface's triggers: most hurt on stepping in and again at the end of a turn there with the same
+ * effect, which reads as one sentence ("whoever steps in or stays: …").
+ */
+function surfaceTriggers(sf: SurfaceDef): string[] {
+  const enter = sf.triggers.find((x) => x.on === 'enterCell');
+  const stay = sf.triggers.find((x) => x.on === 'turnEnd');
+  const same =
+    enter && stay && enter.subject === stay.subject && describeEffects(enter.effects) === describeEffects(stay.effects);
+  if (!same) return sf.triggers.map(describeTrigger);
+  const rest = sf.triggers.filter((x) => x !== enter && x !== stay).map(describeTrigger);
+  const kind = enter.effectTags?.length
+    ? ` (${enter.effectTags.map((tag) => t(`tag.${tag}` as TextKey)).join(', ')})`
+    : '';
+  return [`${t('when.linger')}: ${describeEffects(enter.effects)}${kind}`, ...rest];
+}
+
+/** What a surface does: its triggers, what it carries, how it reacts. */
+export function describeSurface(sf: SurfaceDef): string {
+  const parts = [
+    ...surfaceTriggers(sf),
+    ...(sf.conducts ? [t('flag.conducts', { tag: t(`tag.${sf.conducts}` as TextKey) })] : []),
+    ...(sf.reactions ?? []).map((x) =>
+      x.result
+        ? t('flag.reaction', { with: name(getSurface(x.with).nameKey), result: name(getSurface(x.result).nameKey) })
+        : t('flag.reactionGone', { with: name(getSurface(x.with).nameKey) }),
+    ),
+  ];
+  return capital(parts.length ? sentences(parts) : t('flag.inert'));
+}
+
+export interface GlossaryEntry {
+  readonly name: string;
+  readonly text: string;
+}
+
+/**
+ * The statuses and surfaces an ability or rule mentions, each explained: shown under its description so
+ * "Curse" or "Charge" never stays a bare word.
+ */
+export function glossary(source: AbilityDef | RuleDef): GlossaryEntry[] {
+  const statuses = new Set<string>();
+  const surfaces = new Set<string>();
+  const walk = (effects: readonly EffectSpec[]) => {
+    for (const e of effects) {
+      if (e.kind === 'status' || e.kind === 'removeStatus') statuses.add(e.status);
+      if (e.kind === 'damage' && e.fromStatus) statuses.add(e.fromStatus);
+      if (e.kind === 'surface' || e.kind === 'clearSurface' || e.kind === 'scatterSurface') surfaces.add(e.surface);
+      if (e.kind === 'summon') for (const sf of e.consumes ?? []) surfaces.add(sf);
+      if (e.kind === 'projectile') walk(e.onHit);
+      if (e.kind === 'dash') walk(e.onImpact);
+      if (e.kind === 'consume') {
+        surfaces.add(e.surface);
+        walk(e.effects);
+      }
+    }
+  };
+  if ('effects' in source) {
+    walk(source.effects);
+    if (source.target.kind === 'cell') for (const sf of source.target.surface ?? []) surfaces.add(sf);
+  } else {
+    walk(source.onGain ?? []);
+    for (const tr of source.triggers) {
+      walk(tr.effects);
+      if (tr.subjectStatus) statuses.add(tr.subjectStatus);
+      if (tr.subjectSurface) surfaces.add(tr.subjectSurface);
+      if (tr.ownerStatusAtLeast) statuses.add(tr.ownerStatusAtLeast.status);
+    }
+  }
+  return [
+    ...[...statuses].map((id) => {
+      const st = getStatus(id);
+      return { name: `${st.icon} ${name(st.nameKey)}`, text: describeStatus(st) };
+    }),
+    ...[...surfaces].map((id) => ({
+      name: capital(name(getSurface(id).nameKey)),
+      text: describeSurface(getSurface(id)),
+    })),
+  ];
+}
+
+/** The glossary as plain text, for native tooltips. */
+export const glossaryText = (source: AbilityDef | RuleDef) =>
+  glossary(source)
+    .map((g) => `${g.name}: ${g.text}`)
+    .join('\n');

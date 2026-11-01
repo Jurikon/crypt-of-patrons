@@ -71,6 +71,12 @@ const STATE_MIGRATIONS: Record<number, (s: Json) => Json> = {
     enemies: Array.isArray(s.enemies) ? (s.enemies as Json[]).map((e) => ({ phase: 0, ...e })) : s.enemies,
     run: s.run ? { act: 1, ...(s.run as Json) } : null,
   }),
+  // v9 → v10: counters for "every n-th" rules (Static charge).
+  9: (s) => ({
+    ...s,
+    version: 10,
+    players: (s.players as Json[]).map((p) => ({ counters: [], ...p })),
+  }),
 };
 
 export function migrateState(raw: unknown): GameState | null {

@@ -1208,3 +1208,35 @@ kbd {
   animation: hybrid-news 3.6s ease-out forwards;
   pointer-events: none;
 }
+
+/* ---- Explanations ---- */
+.glossary {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.glossary-line {
+  color: var(--ink-dim);
+  font-size: 11px;
+  line-height: 1.35;
+  margin-top: 3px;
+}
+
+.glossary-name {
+  color: var(--ink);
+}
+
+.reward-hint {
+  color: var(--ink-dim);
+  font-size: 12px;
+  max-width: 900px;
+  text-align: center;
+}
+
+.door-hint {
+  font-size: 10px;
+  white-space: normal;
+  width: 150px;
+  opacity: 0.85;
+}

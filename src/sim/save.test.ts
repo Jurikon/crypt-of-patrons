@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { apply, replay } from './apply';
 import type { Command } from './commands';
 import { migrateState, readSave, writeSave } from './save';
-import { createGame } from './state';
+import { createGame, STATE_VERSION } from './state';
 
 describe('saves', () => {
   it('a saved run loads back to exactly the same state', () => {
@@ -49,7 +49,7 @@ describe('saves', () => {
       ),
     };
     const migrated = migrateState(JSON.parse(JSON.stringify(v6)))!;
-    expect(migrated.version).toBe(9);
+    expect(migrated.version).toBe(STATE_VERSION);
     expect(migrated.players[0]).toMatchObject({ classes: ['rogue'], hybrid: null, items: [], ruleUses: [] });
     expect(migrated.run).toMatchObject({ initiation: false, treasures: 0 });
   });
@@ -59,7 +59,7 @@ describe('saves', () => {
     const { act: _a, ...run } = v9.run!;
     const v8 = { ...v9, version: 8, run, enemies: v9.enemies.map(({ phase: _p, ...e }) => e) };
     const migrated = migrateState(JSON.parse(JSON.stringify(v8)))!;
-    expect(migrated.version).toBe(9);
+    expect(migrated.version).toBe(STATE_VERSION);
     expect(migrated.run).toMatchObject({ act: 1 });
     expect(migrated.enemies.every((e) => e.phase === 0)).toBe(true);
   });
@@ -69,7 +69,7 @@ describe('saves', () => {
     const { patron: _p, altars: _a, forceAltar: _f, act: _act, ...run } = v9.run!;
     const v7 = { ...v9, version: 7, run, players: v9.players.map(({ gifts: _g, turnUses: _tu, ...p }) => p) };
     const migrated = migrateState(JSON.parse(JSON.stringify(v7)))!;
-    expect(migrated.version).toBe(9);
+    expect(migrated.version).toBe(STATE_VERSION);
     expect(migrated.players[0]).toMatchObject({ gifts: [], turnUses: [] });
     expect(migrated.run).toMatchObject({ patron: null, altars: 0, forceAltar: false });
   });

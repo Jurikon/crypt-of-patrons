@@ -975,6 +975,16 @@ export function settle(eng: Engine): void {
         if (l.owner.ruleUses.includes(l.rule)) continue;
         l.owner.ruleUses.push(l.rule);
       }
+      if (l.trigger.every && isPlayer(state, l.owner)) {
+        // Every n-th time: count this one, act only when the count comes round.
+        let c = l.owner.counters.find((x) => x.rule === l.rule);
+        if (!c) {
+          c = { rule: l.rule, n: 0 };
+          l.owner.counters.push(c);
+        }
+        c.n++;
+        if (c.n % l.trigger.every !== 0) continue;
+      }
       if (l.trigger.oncePerTurn && isPlayer(state, l.owner)) {
         if (l.owner.turnUses.includes(l.rule)) continue;
         l.owner.turnUses.push(l.rule);

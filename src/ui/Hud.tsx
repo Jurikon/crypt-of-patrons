@@ -10,10 +10,11 @@ import {
   getPatron,
   getStatus,
   PATRONS,
+  type RuleDef,
 } from '../content';
 import { t, type TextKey } from '../i18n';
 import { cooldownOf, intentCells, type GameState } from '../sim';
-import { abilityName, describeAbility, describeRule } from './describe';
+import { abilityName, describeAbility, describeRule, glossary, glossaryText } from './describe';
 import { cssColor, giftPatrons } from './RewardScreen';
 import type { ViewState } from './store';
 
@@ -82,6 +83,11 @@ export function Hud({ view, actions, now }: { view: ViewState; actions: HudActio
           <div class="selection-hint">
             {t(aimed ? 'hud.aim' : 'hud.selected', { name: abilityName(selected) })}
             <div class="selection-sub">{describeAbility(selected)}</div>
+            {glossary(selected).map((g) => (
+              <div key={g.name} class="selection-sub glossary-line">
+                <span class="glossary-name">{g.name}:</span> {g.text}
+              </div>
+            ))}
             {emptyTarget && <div class="selection-sub">{t('hud.noTarget')}</div>}
           </div>
         )}
@@ -135,7 +141,7 @@ export function Hud({ view, actions, now }: { view: ViewState; actions: HudActio
                   type="button"
                   class={`ability ${view.selected === id ? 'selected' : ''} ${usable ? '' : 'disabled'}`}
                   onClick={() => actions.selectAbility(slot)}
-                  title={describeAbility(a)}
+                  title={[describeAbility(a), glossaryText(a)].filter(Boolean).join('\n')}
                   data-testid={`ability-${slot + 1}`}
                 >
                   <span class="ability-key">{slot + 1}</span>
@@ -182,13 +188,16 @@ function RunProgress({ run }: { run: NonNullable<GameState['run']> }) {
   );
 }
 
+/** A rule's description and the terms it uses, for a hover tooltip. */
+const withTerms = (r: RuleDef) => [describeRule(r), glossaryText(r)].filter(Boolean).join('\n');
+
 /** The build at a glance (GDD 2): classes and hybrid, modifiers, items. Hover a line for what it does. */
 function BuildPanel({ player: p }: { player: GameState['players'][number] }) {
   return (
     <div class="mods" data-testid="build">
       <div class="mods-title">{t('hud.build')}</div>
       {p.hybrid && (
-        <div class="mod mod-hybrid" title={describeRule(getHybrid(p.hybrid).rule)}>
+        <div class="mod mod-hybrid" title={withTerms(getHybrid(p.hybrid).rule)}>
           ✶ {t(getHybrid(p.hybrid).nameKey as TextKey)}
           <div class="mod-desc">{describeRule(getHybrid(p.hybrid).rule)}</div>
         </div>
@@ -196,7 +205,7 @@ function BuildPanel({ player: p }: { player: GameState['players'][number] }) {
       {p.modifiers.map((id) => {
         const m = getModifier(id);
         return (
-          <div key={id} class="mod" title={describeRule(m)}>
+          <div key={id} class="mod" title={withTerms(m)}>
             ✦ {t(m.nameKey as TextKey)}
           </div>
         );
@@ -211,7 +220,7 @@ function BuildPanel({ player: p }: { player: GameState['players'][number] }) {
             .map((id) => {
               const g = getGift(id);
               return (
-                <div key={id} class={g.patrons ? 'mod mod-gift mod-duo' : 'mod mod-gift'} title={describeRule(g)}>
+                <div key={id} class={g.patrons ? 'mod mod-gift mod-duo' : 'mod mod-gift'} title={withTerms(g)}>
                   {g.patrons
                     ? `${giftPatrons(id)
                         .map((x) => getPatron(x).icon)
@@ -226,7 +235,7 @@ function BuildPanel({ player: p }: { player: GameState['players'][number] }) {
       {p.items.map((id) => {
         const it = getItem(id);
         return (
-          <div key={id} class={it.cursed ? 'mod mod-item cursed' : 'mod mod-item'} title={describeRule(it)}>
+          <div key={id} class={it.cursed ? 'mod mod-item cursed' : 'mod mod-item'} title={withTerms(it)}>
             {it.icon} {t(it.nameKey as TextKey)}
             {it.cursed && <span class="badge badge-cursed">{t('reward.cursed')}</span>}
           </div>

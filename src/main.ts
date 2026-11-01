@@ -55,8 +55,17 @@ const params = parseHash(location.hash);
 let seed = params.seed ?? saved?.state.seed ?? randomSeed();
 const knownClass = (id: string | null | undefined) => (CLASSES.some((c) => c.id === id) ? (id as string) : 'knight');
 let classId = knownClass(params.classId ?? saved?.classId);
-const writeHash = () =>
-  history.replaceState(null, '', formatHash({ seed, classId, debug: parseHash(location.hash).debug }));
+const writeHash = () => history.replaceState(null, '', formatHash({ ...parseHash(location.hash), seed, classId }));
+
+/**
+ * `#god` in the URL: the hero is immortal in every run. Goes through the same debug command as the
+ * menu's button, so the run still replays exactly.
+ */
+function godFromUrl(): void {
+  const p = state.players[0];
+  if (parseHash(location.hash).god && p && !p.god)
+    dispatch({ type: 'debug', playerId: PLAYER_ID, action: 'toggleGod' });
+}
 
 let state: GameState = createGame(seed, { classId });
 /** Every command of the run: seed + class + this list reproduces it exactly. */
@@ -258,6 +267,7 @@ function loadSeed(next: number): void {
   renderer.reset(state, performance.now());
   store.set({ game: state, notice: null });
   refreshPreview();
+  godFromUrl();
 }
 
 function newSeed(): void {
@@ -295,6 +305,7 @@ function continueRun(): void {
   renderer.reset(state, performance.now());
   store.set({ game: state, screen: 'play', elapsedMs, notice: null });
   refreshPreview();
+  godFromUrl();
 }
 
 function selectAbility(slot: number): void {
@@ -422,6 +433,7 @@ window.addEventListener('hashchange', () => {
     loadSeed(p.seed ?? seed);
   }
   if (p.debug && !store.get().debugOpen) store.set({ debugOpen: true });
+  godFromUrl();
 });
 window.addEventListener('resize', () => renderer.resize());
 

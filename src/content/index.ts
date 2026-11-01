@@ -632,8 +632,6 @@ export const STATUSES: readonly StatusDef[] = [
       },
     ],
   },
-  /** A counter for "every third blow" gifts: grows with each blow, spent when it pays out. */
-  { id: 'charge', nameKey: 'status.charge', icon: '🔋', stats: [], triggers: [], stacks: true },
   {
     id: 'fading',
     nameKey: 'status.fading',
@@ -1035,22 +1033,12 @@ export const GIFTS: readonly RuleDef[] = [
     patron: 'velkar',
     stats: [],
     triggers: [
-      // Two blows charge it; the third stuns and spends the charge.
       {
         on: 'hit',
         actor: 'owner',
         tags: ['basic'],
-        ownerStatusAtLeast: { status: 'charge', amount: 2 },
-        effects: [
-          { kind: 'status', status: 'stun', turns: 1, to: { kind: 'subject' } },
-          { kind: 'removeStatus', status: 'charge', to: { kind: 'self' } },
-        ],
-      },
-      {
-        on: 'hit',
-        actor: 'owner',
-        tags: ['basic'],
-        effects: [{ kind: 'status', status: 'charge', turns: 99, amount: 1, to: { kind: 'self' } }],
+        every: 3,
+        effects: [{ kind: 'status', status: 'stun', turns: 1, to: { kind: 'subject' } }],
       },
     ],
   },

@@ -5,7 +5,7 @@ import { generateRoom, type Room } from './gen/room';
 import { placeCorpses, placeEncounter, placeFeatures } from './encounter';
 import { declareIntentsInPlace } from './ai';
 
-export const STATE_VERSION = 9;
+export const STATE_VERSION = 10;
 
 export interface Cooldown {
   readonly abilityId: string;
@@ -45,6 +45,8 @@ export interface Player extends UnitBase {
   ruleUses: string[];
   /** Rules with a once-per-turn trigger that already fired this turn. */
   turnUses: string[];
+  /** How many times each "every n-th" rule has matched so far. */
+  counters: { readonly rule: string; n: number }[];
   /** Patron gifts and duo gifts, in the order they were taken. */
   gifts: string[];
   /** Ability ids in slot order; the first is the base attack (also used by walking into an enemy). */
@@ -223,6 +225,7 @@ export function createPlayer(id: string, classId: string, x: number, y: number, 
     items: [],
     ruleUses: [],
     turnUses: [],
+    counters: [],
     gifts: [],
     x,
     y,

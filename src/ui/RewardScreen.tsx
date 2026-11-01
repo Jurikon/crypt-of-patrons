@@ -2,7 +2,7 @@ import { useState } from 'preact/hooks';
 import { ABILITY_SLOTS, getAbility, getClass, getGift, getItem, getModifier, getPassive, getPatron } from '../content';
 import { t, type TextKey } from '../i18n';
 import type { GameState } from '../sim';
-import { abilityName, describeAbility, describeRule } from './describe';
+import { abilityName, describeAbility, describeRule, glossary, type GlossaryEntry } from './describe';
 
 export interface RewardActions {
   /** Take option `index` (null = take nothing); `replace` is the slot a new ability takes over. */
@@ -68,6 +68,47 @@ function giftLook(o: Option): { style?: Record<string, string>; signs: string } 
   return { style: { '--patron': c }, signs };
 }
 
+/** What each kind of reward is, in a line (shown above the cards). */
+const HINTS: Record<Option['kind'], TextKey> = {
+  ability: 'door.ability.hint',
+  modifier: 'door.modifier.hint',
+  upgrade: 'door.upgrade.hint',
+  class: 'door.initiation.hint',
+  gift: 'door.altar.hint',
+  item: 'reward.hint.item',
+};
+
+/** The terms a card mentions, explained (statuses, surfaces). */
+function terms(o: Option): GlossaryEntry[] {
+  switch (o.kind) {
+    case 'ability':
+      return glossary(getAbility(o.id));
+    case 'modifier':
+      return glossary(getModifier(o.id));
+    case 'item':
+      return glossary(getItem(o.id));
+    case 'gift':
+      return glossary(getGift(o.id));
+    case 'class':
+      return getClass(o.id).passives.flatMap((id) => glossary(getPassive(id)));
+    case 'upgrade':
+      return [];
+  }
+}
+
+function Glossary({ entries }: { entries: readonly GlossaryEntry[] }) {
+  if (entries.length === 0) return null;
+  return (
+    <div class="glossary">
+      {entries.map((g) => (
+        <div key={g.name} class="glossary-line">
+          <span class="glossary-name">{g.name}:</span> {g.text}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** Tags shown on ability cards; a cursed item says so. */
 function badges(o: Option): string[] {
   if (o.kind === 'ability') return getAbility(o.id).tags.map((tag) => t(`tag.${tag}` as TextKey));
@@ -117,6 +158,11 @@ export function RewardScreen({ game, actions }: { game: GameState; actions: Rewa
   return (
     <div class="reward" data-testid="reward">
       <div class="reward-title">{altarTitle(run.offer) ?? t('reward.title')}</div>
+      {[...new Set(run.offer.map((o) => o.kind))].map((k) => (
+        <div key={k} class="reward-hint">
+          {t(`reward.kind.${k}` as TextKey)} — {t(HINTS[k])}
+        </div>
+      ))}
       <div class="reward-cards">
         {run.offer.map((o, i) => (
           <button
@@ -147,6 +193,7 @@ export function RewardScreen({ game, actions }: { game: GameState; actions: Rewa
               </div>
             )}
             <div class="reward-desc">{body(o)}</div>
+            <Glossary entries={terms(o)} />
           </button>
         ))}
       </div>
