@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { Vec2 } from '../core/grid';
+import { getSurface } from '../content';
 import type { GameState } from '../sim';
 import { CELL } from './dims';
 import { propGeometry } from './modelMesh';
@@ -17,6 +18,7 @@ const FLAT: Record<string, { color: number; opacity: number; glow?: boolean; vol
   poisonCloud: { color: 0x6ad040, opacity: 0.32, volume: 1.4 },
   water: { color: 0x14506e, opacity: 0.8 },
   holyFire: { color: 0xfff0b0, opacity: 0.9, glow: true },
+  current: { color: 0x2a8aa8, opacity: 0.55 },
 };
 const outline = new THREE.MeshBasicMaterial({ color: 0x2a0a08, side: THREE.BackSide });
 const glow = new THREE.MeshBasicMaterial({ vertexColors: true });
@@ -28,6 +30,24 @@ export class SurfacesView {
   private readonly material = toonMaterial();
   private readonly plane = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
   private readonly box = new THREE.BoxGeometry(1, 1, 1);
+  private readonly arrow = new THREE.ShapeGeometry(
+    new THREE.Shape([
+      new THREE.Vector2(0, 0.42),
+      new THREE.Vector2(0.32, 0.02),
+      new THREE.Vector2(0.14, 0.02),
+      new THREE.Vector2(0.14, -0.38),
+      new THREE.Vector2(-0.14, -0.38),
+      new THREE.Vector2(-0.14, 0.02),
+      new THREE.Vector2(-0.32, 0.02),
+    ]),
+  ).rotateX(-Math.PI / 2);
+  private readonly arrowMaterial = new THREE.MeshBasicMaterial({
+    color: 0xbfefff,
+    transparent: true,
+    opacity: 0.7,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
 
   /** Makes the props match the state exactly (new room, end of playback). */
   sync(state: GameState): void {
@@ -64,7 +84,8 @@ export class SurfacesView {
 
   /** Surfaces without a voxel prop: a glowing or tinted patch, or a volume of smoke or gas. */
   private flat(id: string): THREE.Group | null {
-    const look = FLAT[id];
+    const flow = getSurface(id).flow;
+    const look = FLAT[flow !== undefined ? 'current' : id];
     if (!look) return null;
     const g = new THREE.Group();
     const material = new THREE.MeshBasicMaterial({
@@ -86,6 +107,13 @@ export class SurfacesView {
     }
     g.userData.pulse = look.glow ? 1 : 0;
     g.add(mesh);
+    if (flow !== undefined) {
+      // A pale chevron pointing downstream (north = −Z).
+      const arrow = new THREE.Mesh(this.arrow, this.arrowMaterial);
+      arrow.position.y = 0.02;
+      arrow.rotation.y = -flow * (Math.PI / 2);
+      g.add(arrow);
+    }
     return g;
   }
 
@@ -119,5 +147,7 @@ export class SurfacesView {
     this.material.dispose();
     this.plane.dispose();
     this.box.dispose();
+    this.arrow.dispose();
+    this.arrowMaterial.dispose();
   }
 }

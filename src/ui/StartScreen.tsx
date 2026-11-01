@@ -1,10 +1,13 @@
-import { CLASSES, getAbility, getPassive } from '../content';
+import { CLASSES, getAbility, getPassive, PERKS } from '../content';
 import { t, type TextKey } from '../i18n';
+import { nextCost, perkLevel, type MetaSave } from '../sim';
 import { abilityName, describeAbility, describeRule } from './describe';
 
 export interface StartActions {
   startRun(classId: string): void;
   continueRun(): void;
+  /** Buy the next level of a Chapel upgrade with Ash. */
+  buyPerk(id: string): void;
 }
 
 /** Run start: pick a class (GDD 2), or continue the saved run. */
@@ -12,10 +15,12 @@ export function StartScreen({
   actions,
   canContinue,
   saveError,
+  meta,
 }: {
   actions: StartActions;
   canContinue: boolean;
   saveError: boolean;
+  meta: MetaSave;
 }) {
   return (
     <div class="start" data-testid="start-screen">
@@ -55,6 +60,44 @@ export function StartScreen({
                   <b>{t(getPassive(id).nameKey as TextKey)}</b> — {describeRule(getPassive(id))}
                 </div>
               ))}
+            </button>
+          );
+        })}
+      </div>
+      <Chapel meta={meta} buy={actions.buyPerk} />
+    </div>
+  );
+}
+
+/** The Chapel (M6b, GDD 3): Ash from past runs buys upgrades that every new run starts with. */
+function Chapel({ meta, buy }: { meta: MetaSave; buy: (id: string) => void }) {
+  return (
+    <div class="chapel" data-testid="chapel">
+      <div class="chapel-title">
+        {t('chapel.title')} <span class="chapel-ash">✧ {meta.ash}</span>
+      </div>
+      <div class="chapel-sub">{t('chapel.sub')}</div>
+      <div class="chapel-perks">
+        {PERKS.map((p) => {
+          const level = perkLevel(meta, p.id);
+          const cost = nextCost(meta, p.id);
+          return (
+            <button
+              type="button"
+              key={p.id}
+              class={`chapel-perk${cost === null ? ' maxed' : ''}`}
+              disabled={cost === null || meta.ash < cost}
+              onClick={() => buy(p.id)}
+              data-testid={`perk-${p.id}`}
+            >
+              <div class="chapel-perk-name">
+                {p.icon} {t(p.nameKey as TextKey)}
+              </div>
+              <div class="chapel-perk-desc">{t(`${p.nameKey}.desc` as TextKey)}</div>
+              <div class="chapel-perk-level">
+                {'●'.repeat(level)}
+                {'○'.repeat(p.costs.length - level)} {cost === null ? t('chapel.max') : `✧ ${cost}`}
+              </div>
             </button>
           );
         })}

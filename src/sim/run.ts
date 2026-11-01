@@ -10,12 +10,15 @@ import {
   getItem,
   getModifier,
   GIFTS,
+  GOAL_WEIGHTS,
+  getPerk,
   HYBRIDS,
   PATRONS,
   ITEMS,
   MODIFIERS,
   type EffectSpec,
   type RewardKind,
+  type RoomGoal,
   type RuleDef,
 } from '../content';
 import type { GameEvent, RejectReason } from './commands';
@@ -206,6 +209,7 @@ export function roomCleared(state: GameState, events: GameEvent[]): void {
   if (run.kind !== 'rest') run.log.push({ type: 'cleared', depth: run.depth, turns: state.combat.turn });
   if (run.kind === 'boss') {
     // The boss falls: an item for the road ahead, then the next act (or the run is won).
+    run.offerKind = 'boss';
     run.offer = makeOffer(rngFor(state, 'reward'), p, 'boss').filter((o) => o.kind === 'item');
     if (run.offer.length > 0) {
       run.phase = 'reward';
@@ -216,6 +220,7 @@ export function roomCleared(state: GameState, events: GameEvent[]): void {
     return;
   }
   if (run.pending) {
+    run.offerKind = run.pending;
     run.offer = makeOffer(rngFor(state, 'reward'), p, run.pending, run.patron);
     run.pending = null;
     if (run.offer.length > 0) {
@@ -327,8 +332,12 @@ function openDoors(state: GameState, events: GameEvent[]): void {
           )
         : 'upgrade';
       used.add(kind);
+      const goal = kind === 'rest' ? 'clear' : weighted(rng, GOAL_WEIGHTS);
+      const extra = goal !== 'clear' ? { goal } : {};
       doors.push(
-        kind === 'altar' ? { door: x.i, reward: kind, patron: pickPatron(rng, p) } : { door: x.i, reward: kind },
+        kind === 'altar'
+          ? { door: x.i, reward: kind, patron: pickPatron(rng, p), ...extra }
+          : { door: x.i, reward: kind, ...extra },
       );
     }
   }
@@ -394,7 +403,7 @@ export function enterDoor(state: GameState, door: number, events: GameEvent[]): 
   if (offer.reward === 'treasure') run.treasures++;
   if (offer.reward === 'altar') run.altars++;
   run.patron = offer.patron ?? null;
-  enterRoom(state, run.depth + 1, kind, pending, events);
+  enterRoom(state, run.depth + 1, kind, pending, events, offer.goal ?? 'clear');
 }
 
 /**
@@ -407,6 +416,7 @@ export function enterRoom(
   kind: RoomKind,
   pending: RewardKind | null,
   events: GameEvent[],
+  goal: RoomGoal = 'clear',
 ): void {
   const run = state.run;
   if (!run) return;
@@ -428,10 +438,65 @@ export function enterRoom(
     p.freeActions = 0;
     p.ruleUses = [];
     p.turnUses = [];
-    if (kind === 'rest' && p.hp > 0) p.hp = Math.min(p.maxHp, p.hp + Math.ceil(p.maxHp * ACT.restHeal));
+    if (kind === 'rest' && p.hp > 0)
+      p.hp = Math.min(p.maxHp, p.hp + Math.ceil(p.maxHp * (ACT.restHeal + run.restBonus)));
   }
-  populateRoom(state, depth, kind);
+  populateRoom(state, depth, kind, true, kind === 'combat' || kind === 'elite' ? goal : 'clear');
   events.push({ type: 'roomEntered', depth, kind });
   // A rest room has nobody to fight: its doors open at once.
   if (state.combat.status === 'won') roomCleared(state, events);
+}
+
+/** A reward screen shows something else (a Chapel reroll): same kind of reward, freshly drawn. */
+export function rerollReward(state: GameState, events: GameEvent[]): RejectReason | null {
+  const run = state.run;
+  const p = state.players[0];
+  if (!run || !p || run.phase !== 'reward' || run.rerolls <= 0 || !run.offerKind) return 'no_reward';
+  run.rerolls--;
+  const rng = fork(rngFor(state, 'reroll'), String(run.rerolls));
+  const fresh = makeOffer(rng, p, run.offerKind, run.patron);
+  run.offer = run.offerKind === 'boss' ? fresh.filter((o) => o.kind === 'item') : fresh;
+  events.push({ type: 'rewardOffered', options: run.offer });
+  return null;
+}
+
+/**
+ * The Chapel upgrades a run starts with (M6b), applied once at its start: more health, rerolls, a
+ * modifier picked by the seed, better rests, second winds.
+ */
+export function applyPerks(state: GameState, perks: readonly { readonly id: string; readonly level: number }[]): void {
+  const run = state.run;
+  if (!run) return;
+  run.perks = perks.filter((x) => x.level > 0).map((x) => ({ id: x.id, level: x.level }));
+  for (const { id, level } of run.perks) {
+    const e = getPerk(id).effect;
+    for (const p of state.players) {
+      if (e.kind === 'maxHp') {
+        p.maxHp += e.add * level;
+        p.hp += e.add * level;
+      }
+      if (e.kind === 'revive') p.revives += e.add * level;
+      if (e.kind === 'startModifier') {
+        const pick = shuffle(fork(createRng(state.seed), 'perk:modifier'), newModifiers(p))[0];
+        if (pick) p.modifiers.push(pick);
+      }
+    }
+    if (e.kind === 'rerolls') run.rerolls += e.add * level;
+    if (e.kind === 'restHeal') run.restBonus += e.add * level;
+  }
+}
+
+/** Ash a run earns for the Chapel: every cleared room, more for elites and bosses, a bonus for winning. */
+export function ashEarned(state: GameState): number {
+  const run = state.run;
+  if (!run) return 0;
+  let kind: string = 'combat';
+  let ash = 0;
+  for (const e of run.log) {
+    if (e.type === 'room') kind = e.kind;
+    if (e.type === 'cleared')
+      ash += ACT.ash.room + (kind === 'elite' ? ACT.ash.elite : 0) + (kind === 'boss' ? ACT.ash.boss : 0);
+    if (e.type === 'end' && e.result === 'won') ash += ACT.ash.win;
+  }
+  return ash;
 }

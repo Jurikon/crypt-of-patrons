@@ -113,7 +113,8 @@ export function modelGeometry(model: VoxelModel): ModelGeometry {
   const eyeBoxes = model.eyes.map(([x, y, z]) =>
     new THREE.BoxGeometry(s * 1.05, s * 1.05, s * 1.05).translate(x * s, (y + 0.5) * s, z * s + s * 0.05),
   );
-  const eyes = mergeGeometries(eyeBoxes) ?? new THREE.BufferGeometry();
+  // Things without eyes (a sarcophagus): merging an empty list throws.
+  const eyes = (eyeBoxes.length ? mergeGeometries(eyeBoxes) : null) ?? new THREE.BufferGeometry();
   const [px, py, pz] = model.arm.pivot;
   const g: ModelGeometry = { model, body, arm, eyes, pivot: new THREE.Vector3(px * s, (py + 0.5) * s, pz * s) };
   cache.set(model, g);

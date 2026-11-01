@@ -735,7 +735,55 @@ function voice(): VoxelModel {
   };
 }
 
+/** A stone sarcophagus with a carved lid (act 1): break it for what lies inside. */
+function sarcophagus(): VoxelModel {
+  const s = new Shape();
+  s.box(-7, 7, 0, 9, -12, 12, IRON);
+  s.box(-8, 8, 10, 12, -13, 13, BONE_DARK);
+  s.box(-1, 1, 13, 13, -9, 9, BONE[2]);
+  s.box(-5, 5, 13, 13, 4, 6, BONE[2]);
+  for (let z = -10; z <= 10; z += 4) s.box(-7, 7, 4, 5, z, z, BONE_DARK);
+  const arm = new Shape();
+  arm.set(0, -1, 0, IRON);
+  return {
+    voxel: 0.045,
+    palette: PALETTE,
+    body: s.voxels(),
+    arm: { pivot: [0, 6, 0], voxels: arm.voxels() },
+    eyes: [],
+    poses: { idle: 0, windup: 0, strike: 0 },
+  };
+}
+
+/** A totem of stacked skulls on a pole: calls up enemies until broken. */
+function totem(): VoxelModel {
+  const s = new Shape();
+  s.box(-1, 1, 0, 34, -1, 1, WOOD_DARK);
+  s.box(-4, 4, 0, 1, -4, 4, IRON);
+  const eyes: [number, number, number][] = [];
+  for (const y of [14, 24, 34]) {
+    s.ellipsoid(0, y, 0, 3.6, 3.4, 3.6, 'bone');
+    for (const ex of [-1, 1]) {
+      s.set(ex * 1.5 > 0 ? 2 : -2, y, 4, SOCKET);
+      eyes.push([ex > 0 ? 2 : -2, y, 4]);
+    }
+  }
+  for (const y of [8, 19, 29]) s.box(-3, 3, y, y, -3, 3, CLOTH);
+  const arm = new Shape();
+  arm.set(0, -1, 0, WOOD_DARK);
+  return {
+    voxel: 0.045,
+    palette: PALETTE,
+    body: s.voxels(),
+    arm: { pivot: [0, 20, 0], voxels: arm.voxels() },
+    eyes,
+    poses: { idle: 0, windup: 0, strike: 0 },
+  };
+}
+
 export const MODELS: Readonly<Record<string, VoxelModel>> = {
+  sarcophagus: sarcophagus(),
+  totem: totem(),
   warrior: warrior(),
   archer: archer(),
   warden: warden(),
@@ -803,7 +851,17 @@ function trap(): PropModel {
 
 const RUNE = PALETTE.length;
 
+/** A plate of rusty spikes set in the floor (crypt): always armed. */
+function spikes(): PropModel {
+  const s = new Shape();
+  s.box(-7, 7, 0, 0, -7, 7, IRON);
+  for (let x = -6; x <= 6; x += 2)
+    for (let z = -6; z <= 6; z += 2) s.box(x, x, 1, 3, z, z, (x + z) % 4 === 0 ? RUST : STEEL);
+  return { voxel: 0.045, palette: PALETTE, voxels: s.voxels(), glow: [] };
+}
+
 export const PROPS: Readonly<Record<string, PropModel>> = {
   corpse: corpse(),
   trap: trap(),
+  spikes: spikes(),
 };

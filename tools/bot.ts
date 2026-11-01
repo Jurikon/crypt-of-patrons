@@ -233,9 +233,15 @@ export interface RunResult {
 }
 
 /** Plays a whole act: fights with `strategy`, takes rewards, walks through doors. */
-export function playRun(seed: number, classId: string, strategy: Strategy = 'greedy', altars = false): RunResult {
+export function playRun(
+  seed: number,
+  classId: string,
+  strategy: Strategy = 'greedy',
+  altars = false,
+  perks: readonly { readonly id: string; readonly level: number }[] = [],
+): RunResult {
   const rng = createRng(`run/${seed}/${classId}`);
-  let state = createGame(seed, { classId });
+  let state = createGame(seed, { classId, perks });
   // An impatient player: after 15 turns without anyone getting hurt, just go for the enemies.
   let calm = 0;
   let lastHp = -1;
@@ -246,13 +252,30 @@ export function playRun(seed: number, classId: string, strategy: Strategy = 'gre
     calm = hp === lastHp ? calm + 1 : 0;
     lastHp = hp;
     const between = runAction(rng, state, strategy, altars);
+    // A fight dragging on for ages (both sides going round in circles): shake it up with random moves.
     const act =
-      strategy === 'careful' && calm < 15 ? carefulAction : strategy === 'random' ? randomAction : greedyAction;
+      state.combat.turn > 200 && state.combat.turn % 3 === 0
+        ? randomAction
+        : strategy === 'careful' && calm < 15
+          ? carefulAction
+          : strategy === 'random'
+            ? randomAction
+            : greedyAction;
     const cmd = between ?? act(rng, state);
     state = apply(state, cmd).state;
   }
   const run = state.run!;
   const result = run.phase === 'won' ? 'won' : run.phase === 'lost' ? 'lost' : 'stuck';
+  if (result === 'stuck' && process.env.BOT_DEBUG)
+    console.log(
+      JSON.stringify({
+        goal: state.combat.goal,
+        turn: state.combat.turn,
+        player: state.players.map((p) => ({ x: p.x, y: p.y, hp: p.hp })),
+        enemies: state.enemies.map((e) => ({ t: e.type, x: e.x, y: e.y, hp: e.hp, affix: e.affix })),
+        surfaces: state.surfaces.filter((x) => x.id !== 'corpse').map((x) => `${x.id}@${x.x},${x.y}`),
+      }),
+    );
   const p = state.players[0]!;
   return {
     seed,

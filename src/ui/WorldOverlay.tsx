@@ -1,4 +1,4 @@
-import { getPatron, type RewardKind } from '../content';
+import { getPatron, type RewardKind, type RoomGoal } from '../content';
 import { t, type TextKey } from '../i18n';
 import type { Intent } from '../sim';
 import type { DoorLabel, LabelUnit } from '../render/renderer';
@@ -16,6 +16,15 @@ const DOOR_ICONS: Record<RewardKind, string> = {
   initiation: '✶',
   treasure: '◆',
   altar: '✟',
+};
+
+/** What a fight behind a door asks. */
+export const GOAL_ICONS: Record<RoomGoal, string> = {
+  clear: '⚔',
+  survive: '⌛',
+  totem: '☗',
+  ambush: '⚠',
+  hunt: '★',
 };
 
 function intentIcon(intent: Intent): string {
@@ -142,7 +151,13 @@ function DoorTag({ d, hint }: { d: DoorLabel; hint: boolean }) {
     >
       <span class="door-icon">{patron ? patron.icon : DOOR_ICONS[d.reward]}</span>
       {patron ? t('door.altar', { patron: t(`${patron.nameKey}.gen` as TextKey) }) : t(`door.${d.reward}` as TextKey)}
+      {d.goal && (
+        <div class="door-goal">
+          {GOAL_ICONS[d.goal]} {t(`goal.${d.goal}` as TextKey)}
+        </div>
+      )}
       {hint && <div class="door-hint">{t(`door.${d.reward}.hint` as TextKey)}</div>}
+      {hint && d.goal && <div class="door-hint">{t(`goal.${d.goal}.hint` as TextKey)}</div>}
     </div>
   );
 }

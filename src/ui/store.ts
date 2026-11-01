@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
-import type { RejectReason, GameState, Preview } from '../sim';
+import type { RejectReason, GameState, MetaSave, Preview } from '../sim';
 import type { FrameLabels, Quality } from '../render/renderer';
 
 /** What the HTML layer shows. The game state here is read-only for the UI. */
@@ -35,6 +35,10 @@ export interface ViewState {
   readonly roomAt: number;
   /** A hybrid just formed: its name and when, for the announcement. */
   readonly hybridNews: { readonly name: string; readonly at: number } | null;
+  /** Ash and Chapel upgrades (they outlive runs). */
+  readonly meta: MetaSave;
+  /** Ash the run that just ended earned, for the result screen. */
+  readonly ashGained: number | null;
   /** A new act just began: its number and when, for the title card. */
   readonly actNews: { readonly act: number; readonly at: number } | null;
   /** A gift was just taken: its patron speaks a line. */

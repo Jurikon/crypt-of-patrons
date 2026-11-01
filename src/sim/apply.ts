@@ -15,12 +15,14 @@ import {
 } from '../content';
 import { actAllies, advanceEnemies, intentCells, nextAttack } from './ai';
 import { makeEnemy } from './encounter';
+import { worldEffects } from './world';
 import {
   addClass,
   chooseReward,
   doorAt,
   effectiveCooldown,
   enterAct,
+  rerollReward,
   enterDoor,
   enterRoom,
   roomCleared,
@@ -155,6 +157,11 @@ export function apply(prev: GameState, command: Command): ApplyResult {
       } else if (command.action === 'toBoss' && state.run) {
         enterRoom(state, ACT.rooms + 1, 'boss', null, events);
       }
+      break;
+    }
+    case 'reroll': {
+      const r = rerollReward(state, events);
+      if (r) return reject(r);
       break;
     }
     case 'debugJump': {
@@ -320,6 +327,9 @@ function worldTurn(eng: Engine): void {
   if (!isActive(state)) return;
 
   advanceEnemies(eng);
+  if (!isActive(state)) return;
+
+  worldEffects(eng);
   if (!isActive(state)) return;
 
   emitTurn(eng, 'turnEnd');

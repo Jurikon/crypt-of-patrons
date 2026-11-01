@@ -1,4 +1,5 @@
 import { add, dirVec, getCell, index, rotateDir, DIRS, type Dir, type Vec2 } from '../core/grid';
+import { weighted } from '../core/rng';
 import {
   getAbility,
   getEnemy,
@@ -10,8 +11,20 @@ import {
 } from '../content';
 import { dealDamage, moved, ownerPlayer, runEffects, settle, type Engine } from './engine';
 import { upgradedEffects } from './run';
+import { enemyDef, isInert } from './enemies';
 import { statOf } from './units';
-import { surfaceAt, unitAt, unitById, type Ally, type Enemy, type GameState, type Intent, type Unit } from './state';
+import { makeEnemy } from './encounter';
+import {
+  biomeOf,
+  surfaceAt,
+  unitAt,
+  unitById,
+  type Ally,
+  type Enemy,
+  type GameState,
+  type Intent,
+  type Unit,
+} from './state';
 
 /**
  * Enemy behaviour. Fully deterministic: fixed enemy order, BFS with a fixed neighbour order,
@@ -51,7 +64,7 @@ export function nextAttack(e: Enemy): AttackSpec {
 }
 
 const behaviorOf = (e: Enemy): EnemyBehavior => phaseOf(e)?.behavior ?? getEnemy(e.type).behavior;
-const moveOf = (e: Enemy): number => phaseOf(e)?.move ?? getEnemy(e.type).move;
+const moveOf = (e: Enemy): number => phaseOf(e)?.move ?? enemyDef(e).move;
 
 /** The square around the nearest hero, floor and pits only: where a blast will land. */
 function blastCells(state: GameState, e: Enemy, radius: number): Vec2[] {
@@ -424,6 +437,47 @@ function plan(state: GameState, e: Enemy): Plan {
     : planRanged(state, e, e.moved ? 0 : moveOf(e), behavior.minRange, behavior.maxRange, targets);
 }
 
+/** A free floor cell next to a unit (nearest first in a fixed order), if any. */
+function freeNeighbour(state: GameState, at: Vec2): Vec2 | null {
+  for (const d of DIRS) {
+    const c = add(at, dirVec(d));
+    if (getCell(state.room.grid, c.x, c.y) === 'floor' && !unitAt(state, c.x, c.y)) return c;
+  }
+  return null;
+}
+
+/** A totem calls up one enemy of the act's biome next to itself (picked by the run's RNG). */
+function spawnNear(eng: Engine, totem: Enemy): void {
+  const cell = freeNeighbour(eng.state, totem);
+  if (cell) spawnEnemy(eng, pickBiomeEnemy(eng.state), cell);
+}
+
+/** One of the biome's ordinary enemies, by weight, from the run's RNG. */
+export function pickBiomeEnemy(state: GameState): string {
+  return weighted(
+    state.rng,
+    biomeOf(state).enemies.map((x) => ({ item: x.id, weight: x.weight })),
+  );
+}
+
+/** A new enemy walks in (waves, totems): it faces the nearest hero and telegraphs on its next turn. */
+export function spawnEnemy(eng: Engine, type: string, cell: Vec2): void {
+  const { state, events } = eng;
+  const hero = nearestPlayer(state, cell);
+  const e = makeEnemy(`m${state.nextId++}`, type, cell, hero ? dirTowards(cell, hero) : 2, false);
+  state.enemies.push(e);
+  events.push({
+    type: 'summoned',
+    unitId: e.id,
+    summon: type,
+    side: 'foes',
+    owner: 'world',
+    at: cell,
+    dir: e.dir,
+    hp: e.hp,
+  });
+}
+
 /** A boss whose health fell to the next phase's threshold enters it (once): new pattern, its entrance. */
 function checkPhase(eng: Engine, e: Enemy): void {
   const phases = getEnemy(e.type).phases ?? [];
@@ -503,6 +557,12 @@ export function advanceEnemies(eng: Engine): void {
   for (const id of state.enemies.map((e) => e.id)) {
     const e = state.enemies.find((x) => x.id === id);
     if (!e || livingPlayers(state).length === 0 || state.combat.status !== 'active') continue;
+    // Things never move or strike; a totem calls up help on its beat.
+    if (isInert(e)) {
+      const every = getEnemy(e.type).spawnEvery;
+      if (every && state.combat.turn % every === 0) spawnNear(eng, e);
+      continue;
+    }
     checkPhase(eng, e);
     if (!state.enemies.includes(e) || state.combat.status !== 'active') continue;
     if (isStunned(e)) {
@@ -531,6 +591,7 @@ export function advanceEnemies(eng: Engine): void {
 /** Combat start: enemies face the nearest player and telegraph without moving, so the player acts first. */
 export function declareIntentsInPlace(state: GameState): void {
   for (const e of state.enemies) {
+    if (isInert(e)) continue;
     const p = nearestPlayer(state, e);
     if (p) e.dir = dirTowards(e, p);
     e.intent = intentFor(state, e, e.dir);

@@ -1,11 +1,20 @@
 import { createRng, fork, type Rng } from '../core/rng';
 import type { Dir, Vec2 } from '../core/grid';
-import { BIOMES, getClass, type BiomeDef, type RewardKind, type UpgradeKind } from '../content';
+import {
+  BIOMES,
+  getClass,
+  getEnemy,
+  type BiomeDef,
+  type RewardKind,
+  type RoomGoal,
+  type UpgradeKind,
+} from '../content';
 import { generateRoom, type Room } from './gen/room';
-import { placeCorpses, placeEncounter, placeFeatures } from './encounter';
+import { assignAffixes, placeCorpses, placeEncounter, placeFeatures, placeGoalAndObjects } from './encounter';
 import { declareIntentsInPlace } from './ai';
+import { applyPerks } from './run';
 
-export const STATE_VERSION = 10;
+export const STATE_VERSION = 11;
 
 export interface Cooldown {
   readonly abilityId: string;
@@ -47,6 +56,8 @@ export interface Player extends UnitBase {
   turnUses: string[];
   /** How many times each "every n-th" rule has matched so far. */
   counters: { readonly rule: string; n: number }[];
+  /** Second winds left: dying with one stands you back up instead (a Chapel upgrade). */
+  revives: number;
   /** Patron gifts and duo gifts, in the order they were taken. */
   gifts: string[];
   /** Ability ids in slot order; the first is the base attack (also used by walking into an enemy). */
@@ -99,6 +110,8 @@ export interface Enemy extends UnitBase {
   elite: boolean;
   /** Strikes made so far; picks the next attack of a `pattern`. */
   strikes: number;
+  /** An elite trait (M6b), if it has one. */
+  affix?: string;
   /** Boss phase reached (0 = none yet). */
   phase: number;
 }
@@ -126,6 +139,8 @@ export interface DoorOffer {
   readonly reward: RewardKind;
   /** Altars: whose. */
   readonly patron?: string;
+  /** What the fight behind it asks (plain clearing when absent). */
+  readonly goal?: RoomGoal;
 }
 
 /** One reward option on the pick-1-of-3 screen. */
@@ -152,6 +167,14 @@ export type RunLogEntry =
 export interface RunState {
   /** Act (biome), 1-based. */
   act: number;
+  /** Chapel upgrades this run started with (M6b). */
+  perks: { readonly id: string; readonly level: number }[];
+  /** Reward rerolls left. */
+  rerolls: number;
+  /** Extra share of max health rest rooms restore. */
+  restBonus: number;
+  /** What kind of reward the options on screen are (for rerolls). */
+  offerKind?: RewardKind | null;
   /** Room number in the act, 1-based; ACT.rooms + 1 is the boss room. */
   depth: number;
   kind: RoomKind;
@@ -185,6 +208,10 @@ export interface CombatState {
   turn: number;
   phase: 'player' | 'enemy';
   status: 'active' | 'won' | 'lost';
+  /** What wins this fight (M6b); plain clearing when absent. */
+  goal?: RoomGoal;
+  /** The unit whose death wins it (the totem, the leader). */
+  goalTarget?: string;
 }
 
 /** The whole game state. Plain JSON data; never holds functions, classes or DOM references. */
@@ -206,6 +233,8 @@ export interface GameState {
   nextId: number;
   /** The run around this room; null for single test fights. */
   run: RunState | null;
+  /** A telegraphed strike of the place itself (light through the windows): lands on these cells next turn. */
+  omen?: { readonly cells: readonly Vec2[]; readonly damage: number } | null;
 }
 
 export interface CreateGameOptions {
@@ -213,6 +242,8 @@ export interface CreateGameOptions {
   readonly classId?: string;
   /** Spawn an encounter (default true). Tests turn this off to build exact situations. */
   readonly enemies?: boolean;
+  /** Chapel upgrades bought between runs (M6b). */
+  readonly perks?: readonly { readonly id: string; readonly level: number }[];
 }
 
 export function createPlayer(id: string, classId: string, x: number, y: number, dir: Dir): Player {
@@ -226,6 +257,7 @@ export function createPlayer(id: string, classId: string, x: number, y: number, 
     ruleUses: [],
     turnUses: [],
     counters: [],
+    revives: 0,
     gifts: [],
     x,
     y,
@@ -260,6 +292,9 @@ export function createGame(seed: number, opts: CreateGameOptions = {}): GameStat
     nextId: 1,
     run: {
       act: 1,
+      perks: [],
+      rerolls: 0,
+      restBonus: 0,
       depth: 1,
       kind: 'combat',
       phase: 'combat',
@@ -279,6 +314,7 @@ export function createGame(seed: number, opts: CreateGameOptions = {}): GameStat
   state.players = (opts.playerIds ?? ['p1']).map((id) =>
     createPlayer(id, classId, state.room.spawn.x, state.room.spawn.y, state.room.spawn.dir),
   );
+  if (opts.perks?.length) applyPerks(state, opts.perks);
   populateRoom(state, 1, 'combat', opts.enemies !== false);
   return state;
 }
@@ -299,23 +335,34 @@ export function biomeOf(state: GameState): BiomeDef {
  * Fills the current room with its encounter, corpses and the biome's hazards (by depth and kind) and
  * starts the fight. Rest rooms are empty and start cleared.
  */
-export function populateRoom(state: GameState, depth: number, kind: RoomKind, enemies = true): void {
+export function populateRoom(
+  state: GameState,
+  depth: number,
+  kind: RoomKind,
+  enemies = true,
+  goal: RoomGoal = 'clear',
+): void {
   const root = createRng(state.seed);
   const act = state.run?.act ?? 1;
   state.allies = [];
   state.enemies = [];
   state.surfaces = [];
-  state.combat = { turn: 1, phase: 'player', status: 'active' };
+  state.omen = null;
+  state.combat = { turn: 1, phase: 'player', status: 'active', ...(goal !== 'clear' ? { goal } : {}) };
   if (enemies && kind !== 'rest') {
-    state.enemies = placeEncounter(fork(root, label('encounter', depth, act)), state, depth, kind);
+    state.enemies = placeEncounter(fork(root, label('encounter', depth, act)), state, depth, kind, goal);
+    if (kind !== 'boss') placeGoalAndObjects(fork(root, label('goal', depth, act)), state, goal, biomeOf(state));
+    assignAffixes(fork(root, label('affix', depth, act)), state, kind);
     state.surfaces = [
       ...placeCorpses(fork(root, label('corpses', depth, act)), state),
       ...placeFeatures(fork(root, label('features', depth, act)), state, biomeOf(state)),
     ];
     declareIntentsInPlace(state);
   }
-  if (state.enemies.length === 0) state.combat.status = 'won';
+  if (!state.enemies.some((e) => !isInertType(e.type))) state.combat.status = 'won';
 }
+
+const isInertType = (type: string) => getEnemy(type).inert === true;
 
 /** Generates the room for a depth of an act, in its biome's style: the boss room is the biggest square. */
 export function roomFor(seed: number, depth: number, kind: RoomKind, act = 1): Room {

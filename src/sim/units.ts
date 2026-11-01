@@ -1,4 +1,14 @@
-import { getGift, getHybrid, getItem, getModifier, getPassive, getStatus, type RuleDef, type StatId } from '../content';
+import {
+  getEnemy,
+  getGift,
+  getHybrid,
+  getItem,
+  getModifier,
+  getPassive,
+  getStatus,
+  type RuleDef,
+  type StatId,
+} from '../content';
 import type { GameEvent } from './commands';
 import { isPlayer, type GameState, type Player, type Unit } from './state';
 
@@ -25,15 +35,31 @@ export function statOf(state: GameState, unit: Unit | undefined, stat: StatId): 
   return total;
 }
 
+/**
+ * Lost when every hero is down. Won by the room's goal (M6b): every fighter dead (things like sarcophagi
+ * do not count), the totem or the leader broken; a survival room is won by the clock (`winCombat`).
+ */
 export function checkCombatEnd(state: GameState, events: GameEvent[]): void {
   if (state.combat.status !== 'active') return;
   if (state.players.every((p) => p.hp <= 0)) {
     state.combat.status = 'lost';
     events.push({ type: 'combatEnded', status: 'lost' });
-  } else if (state.enemies.length === 0) {
-    state.combat.status = 'won';
-    events.push({ type: 'combatEnded', status: 'won' });
+    return;
   }
+  const goal = state.combat.goal ?? 'clear';
+  const target = state.combat.goalTarget;
+  if (goal === 'totem' || goal === 'hunt') {
+    if (target && !state.enemies.some((e) => e.id === target)) winCombat(state, events);
+  } else if (goal !== 'survive' && !state.enemies.some((e) => !getEnemy(e.type).inert)) winCombat(state, events);
+}
+
+/** The fight is won: whoever is left runs off (the room is the heroes'). */
+export function winCombat(state: GameState, events: GameEvent[]): void {
+  if (state.combat.status !== 'active') return;
+  for (const e of state.enemies) events.push({ type: 'fled', unitId: e.id });
+  state.enemies = [];
+  state.combat.status = 'won';
+  events.push({ type: 'combatEnded', status: 'won' });
 }
 
 export function cooldownOf(player: Player, abilityId: string): number {

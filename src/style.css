@@ -1259,3 +1259,102 @@ kbd {
   width: 150px;
   opacity: 0.85;
 }
+
+/* ---- Chapel, goals, rerolls (M6b) ---- */
+.chapel {
+  margin-top: 18px;
+  padding: 12px 16px;
+  max-width: 980px;
+  border: 1px solid var(--border);
+  background: rgba(20, 12, 8, 0.85);
+}
+
+.chapel-title {
+  font-size: 16px;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.chapel-ash {
+  margin-left: 10px;
+  color: #ffe3a0;
+}
+
+.chapel-sub {
+  margin: 4px 0 10px;
+  color: var(--ink-dim);
+  font-size: 12px;
+}
+
+.chapel-perks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.chapel-perk {
+  width: 178px;
+  text-align: left;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink);
+  background: rgba(30, 18, 12, 0.92);
+  border: 1px solid var(--border);
+  padding: 8px;
+  cursor: pointer;
+}
+
+.chapel-perk:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.chapel-perk.maxed {
+  opacity: 0.85;
+  border-color: #b89a50;
+}
+
+.chapel-perk-name {
+  color: var(--accent);
+  font-size: 13px;
+}
+
+.chapel-perk-desc {
+  color: var(--ink-dim);
+  margin: 3px 0;
+}
+
+.chapel-perk-level {
+  color: #ffe3a0;
+}
+
+.reward-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.result-ash td {
+  color: #ffe3a0;
+}
+
+.goal-banner {
+  margin-top: 4px;
+  padding: 3px 10px;
+  font-size: 13px;
+  color: #ffe3a0;
+  background: rgba(20, 10, 6, 0.8);
+  border: 1px solid #8a6a30;
+  text-align: center;
+}
+
+.door-goal {
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.reward-works {
+  margin-top: 6px;
+  color: #a8e0a0;
+  font-size: 11px;
+}

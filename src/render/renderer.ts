@@ -5,7 +5,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { createRng, fork, nextU32 } from '../core/rng';
 import { getCell, type Vec2 } from '../core/grid';
-import { MODIFIERS, getModifier, getStatus } from '../content';
+import { MODIFIERS, getAffix, getModifier, getStatus } from '../content';
 import { t, type TextKey } from '../i18n';
 import {
   biomeOf,
@@ -26,7 +26,7 @@ import { Highlights, type Highlight } from './highlights';
 import { SurfacesView } from './surfacesView';
 import { AltarView } from './altarView';
 import { DoorsView } from './doorsView';
-import type { RewardKind } from '../content';
+import type { RewardKind, RoomGoal } from '../content';
 import { UnitsView, type UnitVisual } from './unitsView';
 import { buildCave } from './voxel/cave';
 
@@ -88,8 +88,10 @@ export interface LabelUnit {
   /** A summon fighting for the players. */
   readonly ally: boolean;
   readonly type: string;
-  /** Status icons to show over the unit. */
+  /** Status icons to show over the unit (its elite trait and a goal star first). */
   readonly statuses: readonly string[];
+  /** Elite trait, for the tooltip. */
+  readonly affix: string | null;
   readonly hp: number;
   readonly maxHp: number;
   readonly intent: Intent | null;
@@ -118,6 +120,8 @@ export interface DoorLabel {
   readonly reward: RewardKind;
   /** An altar's patron. */
   readonly patron?: string | undefined;
+  /** The fight's goal behind the door (plain clearing when absent). */
+  readonly goal?: RoomGoal | undefined;
 }
 
 /** Everything the HTML overlay needs to draw this frame. */
@@ -507,6 +511,12 @@ export class GameRenderer {
       case 'fell':
         v.die(e.unitId, now, EVENT_MS.fell ?? 0, true);
         return EVENT_MS.fell ?? 0;
+      case 'fled':
+        v.die(e.unitId, now, EVENT_MS.died ?? 0, false);
+        return 0;
+      case 'revived':
+        this.floater(e.unitId, `✚ ${e.hp}`, 'info', now);
+        return EVENT_MS.died ?? 0;
       case 'died':
         if (isPlayer) {
           rig.onEvent(e, now);
@@ -632,21 +642,27 @@ export class GameRenderer {
       for (const e of vs.enemies as Enemy[]) {
         if (!e.intent) continue;
         const { cells, hit } = intentCells(vs, e, e.intent);
-        if (e.intent.kind === 'summon') {
-          // Where new enemies will rise next turn.
+        if (e.intent.kind === 'summon' || e.intent.kind === 'aid') {
+          // Where new enemies will rise next turn, or who will be helped.
           for (const c of cells) {
             list.push({ cell: c, kind: 'summon' });
-            cellLabels.push({ cell: c, text: '☠', kind: 'intent' });
+            cellLabels.push({ cell: c, text: e.intent.kind === 'aid' ? '✚' : '☠', kind: 'intent' });
           }
           continue;
         }
         for (const c of cells) list.push({ cell: c, kind: 'intent' });
         const impact = hit ? { x: hit.x, y: hit.y } : cells[cells.length - 1];
-        if (e.intent.kind === 'sweep')
+        if (e.intent.kind === 'sweep' || e.intent.kind === 'burst' || e.intent.kind === 'blast')
           for (const c of cells) cellLabels.push({ cell: c, text: String(e.intent.damage), kind: 'intent' });
         else if (impact) cellLabels.push({ cell: impact, text: String(e.intent.damage), kind: 'intent' });
       }
     }
+    // Light through the windows: the cells it will strike at the end of the next turn.
+    if (vs?.omen)
+      for (const c of vs.omen.cells) {
+        list.push({ cell: c, kind: 'intent' });
+        cellLabels.push({ cell: c, text: `☀${vs.omen.damage}`, kind: 'intent' });
+      }
     // Where W leads: a faint frame on the free cell ahead (only when nothing is being aimed).
     const me = this.target_?.players[0];
     if (me && !this.preview && !this.isBusy(now) && me.hp > 0) {
@@ -744,7 +760,12 @@ export class GameRenderer {
         id: u.id,
         isPlayer: false,
         ally: u.ally,
-        statuses: u.statuses.map((id) => getStatus(id).icon),
+        statuses: [
+          ...(u.affix ? [getAffix(u.affix).icon] : []),
+          ...(this.target_?.combat.goalTarget === u.id ? ['★'] : []),
+          ...u.statuses.map((id) => getStatus(id).icon),
+        ],
+        affix: u.affix ?? null,
         type: u.type,
         hp: u.hp,
         maxHp: u.maxHp,
@@ -810,7 +831,8 @@ export class GameRenderer {
     if (run?.phase === 'doors' && this.target_)
       for (const o of run.doors) {
         const d = this.target_.room.doors[o.door];
-        if (d) doors.push({ at: this.project(cellCenter(d).setY(2.15)), reward: o.reward, patron: o.patron });
+        if (d)
+          doors.push({ at: this.project(cellCenter(d).setY(2.15)), reward: o.reward, patron: o.patron, goal: o.goal });
       }
     return {
       width: this.cssW,

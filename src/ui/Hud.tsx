@@ -16,6 +16,7 @@ import { t, type TextKey } from '../i18n';
 import { cooldownOf, intentCells, type GameState } from '../sim';
 import { abilityName, describeAbility, describeRule, glossary, glossaryText } from './describe';
 import { cssColor, giftPatrons } from './RewardScreen';
+import { GOAL_ICONS } from './WorldOverlay';
 import type { ViewState } from './store';
 
 export interface HudActions {
@@ -55,6 +56,7 @@ export function Hud({ view, actions, now }: { view: ViewState; actions: HudActio
     <>
       <div class="turn-banner" data-testid="turn-banner">
         {game.run && <RunProgress run={game.run} />}
+        {game.combat.goal && game.combat.status === 'active' && <GoalBanner game={game} />}
         <span class="turn-number">{t('hud.turn', { n: game.combat.turn })}</span>
       </div>
 
@@ -156,6 +158,17 @@ export function Hud({ view, actions, now }: { view: ViewState; actions: HudActio
         </div>
       </div>
     </>
+  );
+}
+
+/** What this fight asks (M6b): survive for a few more turns, break the totem, hunt the leader. */
+function GoalBanner({ game }: { game: GameState }) {
+  const goal = game.combat.goal ?? 'clear';
+  const left = Math.max(0, ACT.surviveTurns - game.combat.turn + 1);
+  return (
+    <div class="goal-banner" data-testid="goal">
+      {GOAL_ICONS[goal]} {t(`goal.${goal}.now` as TextKey, { n: left })}
+    </div>
   );
 }
 

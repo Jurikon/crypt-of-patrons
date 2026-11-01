@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { isInert } from './enemies';
 import { apply } from './apply';
 import { createGame } from './state';
 import { stateFromMap } from './testing';
@@ -173,17 +174,19 @@ describe('encounters on 1000 seeds', () => {
     for (let seed = 0; seed < 1000; seed++) {
       const s = createGame(seed);
       const p = s.players[0]!;
-      expect(s.enemies.length, `seed ${seed}`).toBeGreaterThanOrEqual(2);
-      expect(s.enemies.length, `seed ${seed}`).toBeLessThanOrEqual(4);
+      // Things (sarcophagi) stand around too; they are not part of the encounter.
+      const fighters = s.enemies.filter((e) => !isInert(e));
+      expect(fighters.length, `seed ${seed}`).toBeGreaterThanOrEqual(2);
+      expect(fighters.length, `seed ${seed}`).toBeLessThanOrEqual(4);
       const cells = new Set<string>();
-      for (const e of s.enemies) {
+      for (const e of fighters) {
         typesSeen.add(e.type);
         expect(getCell(s.room.grid, e.x, e.y), `seed ${seed}`).toBe('floor');
         expect(Math.abs(e.x - p.x) + Math.abs(e.y - p.y), `seed ${seed}`).toBeGreaterThanOrEqual(MIN_SPAWN_DISTANCE);
         expect(e.intent, `seed ${seed}`).not.toBeNull();
         cells.add(`${e.x},${e.y}`);
       }
-      expect(cells.size).toBe(s.enemies.length);
+      expect(cells.size).toBe(fighters.length);
       expect(s.combat.status).toBe('active');
     }
     expect([...typesSeen].sort()).toEqual(['ghoul', 'skeletonArcher', 'skeletonWarrior']);

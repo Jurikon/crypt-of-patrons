@@ -54,10 +54,11 @@ describe('the Rogue is no longer a one-blow assassin (owner report, M5)', () => 
     expect(of(r.events, 'resisted')).toHaveLength(1);
     const t = unitById(r.state, 'e1')!;
     expect(hasStatus(t, 'daze')).toBe(false);
-    // Not dazed, it faced the rogue in its own turn: the stab hits the shield (2 − 2), only the bleeding hurts.
+    // Not dazed, it faced the rogue in its own turn: the stab hits the shield (2 − 2, but never below 1),
+    // then the bleeding.
     expect(t.dir).toBe(1);
     const r2 = apply(r.state, use('rogue.dagger'));
-    expect(hp(r2.state, 'e1')).toBe(7 - 1);
+    expect(hp(r2.state, 'e1')).toBe(getEnemy('templar').maxHp - 1 - 1);
   });
 });
 
@@ -189,7 +190,7 @@ describe('act 2, the Flooded Catacombs', () => {
 });
 
 describe('act 3, the Cathedral of the Fallen God', () => {
-  it('a Templar shrugs off blows from the front (shield −2)', () => {
+  it('a Templar shrugs off blows from the front (shield −2, never below 1)', () => {
     const s = map(
       `
       ######
@@ -198,7 +199,7 @@ describe('act 3, the Cathedral of the Fallen God', () => {
       ######`,
       { enemyDir: 3 },
     );
-    expect(hp(apply(s, use('knight.sword')).state, 'e1')).toBe(7);
+    expect(hp(apply(s, use('knight.sword')).state, 'e1')).toBe(getEnemy('templar').maxHp - 1);
     const t = map(
       `
       ######
@@ -208,7 +209,7 @@ describe('act 3, the Cathedral of the Fallen God', () => {
       { enemyDir: 1 },
     );
     const r = apply(t, use('knight.sword'));
-    expect(hp(r.state, 'e1')).toBe(5);
+    expect(hp(r.state, 'e1')).toBe(getEnemy('templar').maxHp - 2);
     expect(unitById(r.state, 'e1')!.dir).toBe(3);
   });
 
@@ -296,7 +297,7 @@ describe('act 3, the Cathedral of the Fallen God', () => {
       ###########`,
       { enemyDir: 3 },
     );
-    s.enemies[0]!.hp = 15;
+    s.enemies[0]!.hp = getEnemy('fallenVoice').phases![0]!.hpAtMost;
     const r = apply(s, swing);
     expect(of(r.events, 'phaseEntered')).toEqual([{ type: 'phaseEntered', unitId: 'e1', phase: 1 }]);
     expect(r.state.surfaces.filter((x) => x.id === 'holyFire').length).toBe(8);
@@ -313,7 +314,7 @@ describe('three acts, three biomes', () => {
       const s = apply(createGame(11), { type: 'debugJump', playerId: 'p1', act: i + 1, depth: ACT.rooms + 1 }).state;
       expect(s.enemies.map((e) => e.type)).toEqual([biome.boss]);
       const room = apply(createGame(11), { type: 'debugJump', playerId: 'p1', act: i + 1, depth: 2 }).state;
-      const types = new Set(biome.enemies.map((e) => e.id));
+      const types = new Set([...biome.enemies.map((e) => e.id), ...(biome.objects ?? []).map((o) => o.enemy)]);
       expect(room.enemies.every((e) => types.has(e.type))).toBe(true);
     }
   });

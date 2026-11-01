@@ -7,15 +7,20 @@ import { GameRenderer, type Quality } from './render/renderer';
 import type { Vec2 } from './core/grid';
 import { CLASSES, getAbility, getGift, getHybrid } from './content';
 import {
+  addAsh,
   apply,
+  ashEarned,
+  buyPerk,
   createGame,
   preview,
+  readMeta,
   readSave,
   validTargets,
   writeSave,
   type Command,
   type DebugAction,
   type GameState,
+  type MetaSave,
 } from './sim';
 import { App, ErrorScreen, type AppActions } from './ui/App';
 import { createStore, type LabelsStore, type ViewState } from './ui/store';
@@ -48,6 +53,25 @@ function storeSave(text: string | null): void {
   }
 }
 const savedText = loadSaveText();
+
+// ---- what carries over between runs (Ash and the Chapel, M6b) ---------------------------------------
+
+const META_KEY = 'cop.meta';
+function loadMeta(): MetaSave {
+  try {
+    return readMeta(localStorage.getItem(META_KEY));
+  } catch {
+    return readMeta(null);
+  }
+}
+function storeMeta(m: MetaSave): void {
+  try {
+    localStorage.setItem(META_KEY, JSON.stringify(m));
+  } catch {
+    // Storage blocked: the Ash is kept only for this session.
+  }
+}
+let meta = loadMeta();
 let saved = readSave(savedText);
 
 // A seed in the URL starts that run directly (links, bug reports, tests); otherwise the start screen.
@@ -67,7 +91,7 @@ function godFromUrl(): void {
     dispatch({ type: 'debug', playerId: PLAYER_ID, action: 'toggleGod' });
 }
 
-let state: GameState = createGame(seed, { classId });
+let state: GameState = createGame(seed, { classId, perks: meta.perks });
 /** Every command of the run: seed + class + this list reproduces it exactly. */
 let commands: Command[] = [];
 let elapsedMs = 0;
@@ -129,6 +153,8 @@ const store = createStore<ViewState>({
   hybridNews: null,
   actNews: null,
   patronVoice: null,
+  meta,
+  ashGained: null,
 });
 if (params.seed !== null) writeHash();
 
@@ -226,6 +252,13 @@ function run(command: Command, now: number): void {
   const formed = result.events.find((e) => e.type === 'hybridFormed');
   if (formed?.type === 'hybridFormed')
     store.set({ hybridNews: { name: t(getHybrid(formed.hybrid).nameKey as TextKey), at: now } });
+  // The run is over: its Ash goes to the Chapel.
+  if (result.events.some((e) => e.type === 'runEnded')) {
+    const ash = ashEarned(state);
+    meta = addAsh(meta, ash);
+    storeMeta(meta);
+    store.set({ meta, ashGained: ash });
+  }
   const act = result.events.find((e) => e.type === 'actEntered');
   if (act?.type === 'actEntered') store.set({ actNews: { act: act.act, at: now } });
   // Taking a gift: its patron (the altar's, for a duo gift) says a line.
@@ -256,7 +289,7 @@ function dispatch(command: Command): void {
 
 function loadSeed(next: number): void {
   seed = next;
-  state = createGame(seed, { classId });
+  state = createGame(seed, { classId, perks: meta.perks });
   commands = [];
   elapsedMs = 0;
   store.set({ screen: 'play', elapsedMs: 0 });
@@ -355,7 +388,7 @@ function chooseReward(index: number | null, replace?: number): void {
 
 const actions: AppActions = {
   newSeed,
-  exportState: () => JSON.stringify({ seed, classId, commands }),
+  exportState: () => JSON.stringify({ seed, classId, perks: state.run?.perks ?? [], commands }),
   cheat: (action: DebugAction) => dispatch({ type: 'debug', playerId: PLAYER_ID, action }),
   setClass,
   grantAbility: (abilityId: string, slot: number) =>
@@ -364,6 +397,14 @@ const actions: AppActions = {
   toggleItem: (itemId: string) => dispatch({ type: 'debugItem', playerId: PLAYER_ID, itemId }),
   toggleGift: (giftId: string) => dispatch({ type: 'debugGift', playerId: PLAYER_ID, giftId }),
   closeDebug: () => store.set({ debugOpen: false }),
+  buyPerk: (id: string) => {
+    const next = buyPerk(meta, id);
+    if (!next) return;
+    meta = next;
+    storeMeta(meta);
+    store.set({ meta });
+  },
+  reroll: () => dispatch({ type: 'reroll', playerId: PLAYER_ID }),
   jump: (act: number, depth: number) => dispatch({ type: 'debugJump', playerId: PLAYER_ID, act, depth }),
   addClass: (id: string) => dispatch({ type: 'debugClass', playerId: PLAYER_ID, classId: id }),
   toggleQuality: () => {

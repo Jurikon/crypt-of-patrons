@@ -354,6 +354,8 @@ export interface SurfaceDef {
   readonly reactions?: readonly { readonly with: string; readonly result: string | null }[];
   /** Enemies walk around it when they can. */
   readonly hazard?: boolean;
+  /** A current: at the end of every turn, whoever stands here is pushed one cell this way (0 = north). */
+  readonly flow?: 0 | 1 | 2 | 3;
 }
 
 /** A unit a player can call up (skeletons). Allies act right after the players. */
@@ -448,6 +450,40 @@ export interface EnemyDef {
   readonly pack?: number;
   /** Boss phases, by falling health. */
   readonly phases?: readonly PhaseDef[];
+  /** A thing rather than a fighter (a sarcophagus, a totem): never acts, and the room is clear without killing it. */
+  readonly inert?: boolean;
+  /** Calls up one enemy of the biome every this many turns (a totem). */
+  readonly spawnEvery?: number;
+}
+
+/** An elite's trait (M6b): shown over its head, changes how it must be fought. */
+export interface AffixDef {
+  readonly id: string;
+  readonly nameKey: string;
+  readonly icon: string;
+  /** Extra cells it moves per turn. */
+  readonly move?: number;
+  readonly frontArmor?: number;
+  readonly traits?: readonly TriggerDef[];
+  readonly onDeath?: readonly EffectSpec[];
+}
+
+/** What a room asks of you (M6b): on the door before you go in, on the HUD inside. */
+export type RoomGoal = 'clear' | 'survive' | 'totem' | 'ambush' | 'hunt';
+
+/** A Chapel upgrade bought with Ash between runs (M6b): applied at the start of every run. */
+export interface PerkDef {
+  readonly id: string;
+  readonly nameKey: string;
+  readonly icon: string;
+  /** Ash for each level, in order; the length is the level cap. */
+  readonly costs: readonly number[];
+  readonly effect:
+    | { readonly kind: 'maxHp'; readonly add: number }
+    | { readonly kind: 'rerolls'; readonly add: number }
+    | { readonly kind: 'startModifier' }
+    | { readonly kind: 'restHeal'; readonly add: number }
+    | { readonly kind: 'revive'; readonly add: number };
 }
 
 /** An act's place (GDD 1): who lives there, its boss, the hazards lying around. */
@@ -458,7 +494,23 @@ export interface BiomeDef {
   readonly enemies: readonly { readonly id: string; readonly weight: number }[];
   readonly boss: string;
   /** Patches of surfaces in every fight: `patches` clusters of up to `size` cells each. */
-  readonly features: readonly { readonly surface: string; readonly patches: number; readonly size: number }[];
+  readonly features: readonly {
+    /** One surface, or several to pick from per patch (currents in four directions). */
+    readonly surface: string | readonly string[];
+    readonly patches: number;
+    readonly size: number;
+    /** Grow in a straight line along the surface's flow instead of a blob. */
+    readonly straight?: boolean;
+  }[];
+  /** Things standing in its fights (sarcophagi): `count` of an inert enemy type. */
+  readonly objects?: readonly { readonly enemy: string; readonly count: number }[];
+  /** A surface that grows: every `every` turns, `count` new cells next to the existing ones (the tide). */
+  readonly spread?: { readonly surface: string; readonly every: number; readonly count: number };
+  /**
+   * Telegraphed strikes of the place itself (light through the windows): every `every` turns a whole row
+   * or column is marked, and a turn later everyone on it takes `damage`.
+   */
+  readonly omens?: { readonly every: number; readonly damage: number };
   /** Room shapes and obstacles (the crypt keeps the generator's defaults). */
   readonly layout?: {
     readonly shapes?: readonly ('rect' | 'cross' | 'l' | 'chamfer')[];

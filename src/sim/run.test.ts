@@ -3,6 +3,7 @@ import { dirVec, type Dir } from '../core/grid';
 import { ACT } from '../content';
 import { apply } from './apply';
 import type { Command, GameEvent } from './commands';
+import { isInert } from './enemies';
 import { enterRoom } from './run';
 import { createGame, type GameState } from './state';
 import { stateFromMap } from './testing';
@@ -123,7 +124,8 @@ describe('run: rooms, rewards, doors', () => {
     const s = createGame(8);
     const events: GameEvent[] = [];
     enterRoom(s, 3, 'elite', 'elite', events);
-    expect(s.enemies.every((e) => e.elite && e.hp === e.maxHp && e.maxHp >= 5)).toBe(true);
+    const fighters = s.enemies.filter((e) => !isInert(e));
+    expect(fighters.every((e) => e.elite && e.hp === e.maxHp && e.maxHp >= 5 && e.affix)).toBe(true);
     const cleared = apply(s, killAll).state;
     expect(cleared.run!.offer.every((o) => o.kind === 'item')).toBe(true);
   });

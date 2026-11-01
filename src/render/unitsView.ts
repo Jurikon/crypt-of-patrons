@@ -75,6 +75,8 @@ export interface UnitVisual {
   spawnStart: number;
   /** Status ids currently on the unit, for the icons over its head. */
   statuses: string[];
+  /** Elite trait (M6b). */
+  affix?: string | undefined;
   rig: Rig | null;
 }
 
@@ -146,6 +148,7 @@ export class UnitsView {
         maxHp: number;
         statuses: readonly { id: string }[];
         elite?: boolean;
+        affix?: string | undefined;
       },
       intent: Intent | null,
     ) => {
@@ -176,6 +179,7 @@ export class UnitsView {
         this.units.set(id, v);
       }
       v.statuses = u.statuses.map((s) => s.id);
+      v.affix = u.affix;
       v.cell = { x: u.x, y: u.y };
       v.pos = cellCenter(u);
       v.dir = u.dir;

@@ -1,6 +1,7 @@
 import { add, dirVec, getCell, DIRS, type CellType, type Dir, type Vec2 } from '../core/grid';
 import { shuffle } from '../core/rng';
 import {
+  ACT,
   getEnemy,
   getStatus,
   getSummon,
@@ -33,6 +34,7 @@ import {
   type Surface,
   type Unit,
 } from './state';
+import { enemyDef } from './enemies';
 import { checkCombatEnd, playerRules, statOf } from './units';
 
 /**
@@ -209,9 +211,9 @@ export function dealDamage(
     dmg *= 1 + statOf(state, source, 'backstab');
   }
   if (attack && dmg > 0) dmg = Math.floor(dmg * (1 + statOf(state, source, 'damageFactor')));
-  // A shield in front: blows from the front lose some damage.
+  // A shield in front: blows from the front lose some damage, but always do at least 1 (no stalemates).
   if (attack && dmg > 0 && isEnemy(state, unit) && fromFront(source, unit))
-    dmg = Math.max(0, dmg - (getEnemy(unit.type).frontArmor ?? 0));
+    dmg = Math.max(1, dmg - (enemyDef(unit).frontArmor ?? 0));
   // A raised guard stops projectiles coming from the front.
   if (source && tags.includes('projectile') && hasFlag(unit, 'frontGuard') && fromFront(source, unit)) dmg = 0;
   if (isPlayer(state, unit) && unit.god) dmg = 0;
@@ -225,6 +227,12 @@ export function dealDamage(
   }
   for (const s of unit.statuses.filter((x) => getStatus(x.id).shield && x.amount <= 0)) removeStatus(eng, unit, s.id);
   unit.hp = Math.max(0, unit.hp - dmg);
+  // A second wind (Chapel upgrade): a hero who would die stands back up once.
+  if (isPlayer(state, unit) && unit.hp <= 0 && unit.revives > 0) {
+    unit.revives--;
+    unit.hp = Math.max(1, Math.ceil(unit.maxHp * ACT.reviveShare));
+    events.push({ type: 'revived', unitId: unit.id, hp: unit.hp });
+  }
   const shownBackstab = backstab && statOf(state, source ?? undefined, 'backstab') > 0;
   events.push({ type: 'damaged', unitId: unit.id, amount: dmg, absorbed, hp: unit.hp, cause, backstab: shownBackstab });
   emit(eng, 'damaged', { actor: source, subject: unit, tags });
@@ -287,7 +295,7 @@ export function killUnit(eng: Engine, unit: Unit, killer: Unit | null, tags: rea
   const cell = pos(unit);
   const side = sideOf(state, unit);
   const carried = unit.statuses.filter((s) => getStatus(s.id).jumps);
-  const onDeath = isEnemy(state, unit) ? getEnemy(unit.type).onDeath : undefined;
+  const onDeath = isEnemy(state, unit) ? enemyDef(unit).onDeath : undefined;
   unit.hp = 0;
   events.push({ type: 'died', unitId: unit.id });
   if (isEnemy(state, unit)) state.enemies.splice(state.enemies.indexOf(unit), 1);
@@ -410,7 +418,7 @@ export function applyStatus(eng: Engine, unit: Unit, id: string, turns: number, 
   const { state, events } = eng;
   if (!isAlive(state, unit)) return;
   const def = getStatus(id);
-  if (isEnemy(state, unit) && getEnemy(unit.type).immune?.includes(id)) {
+  if (isEnemy(state, unit) && enemyDef(unit).immune?.includes(id)) {
     events.push({ type: 'resisted', unitId: unit.id, status: id });
     return;
   }
@@ -924,7 +932,7 @@ function listeners(state: GameState, ev: TriggerEvent): Listener[] {
   // Enemies' own traits (a ghoul's hunger, a templar's watchfulness).
   for (const e of state.enemies) {
     const me = refOf(state, e);
-    for (const t of getEnemy(e.type).traits ?? [])
+    for (const t of enemyDef(e).traits ?? [])
       if (matches(state, t, ev, me, e)) out.push({ owner: e, trigger: t, rule: e.type, surface: null, once: false });
   }
   for (const u of allUnits(state)) {

@@ -22,6 +22,8 @@ export type Command =
   | { readonly type: 'debugItem'; readonly playerId: string; readonly itemId: string }
   /** Debug: give or take away a patron gift. */
   | { readonly type: 'debugGift'; readonly playerId: string; readonly giftId: string }
+  /** Show other options on the reward screen (a Chapel reroll). */
+  | { readonly type: 'reroll'; readonly playerId: string }
   /** Debug: jump to a room of an act (depth ACT.rooms + 1 is the boss). */
   | { readonly type: 'debugJump'; readonly playerId: string; readonly act: number; readonly depth: number }
   /** Debug: add a second class (as Initiation would). */
@@ -114,6 +116,12 @@ export type GameEvent =
     }
   | { readonly type: 'statusApplied'; readonly unitId: string; readonly status: string; readonly turns: number }
   | { readonly type: 'statusExpired'; readonly unitId: string; readonly status: string }
+  /** A second wind: the hero stood back up instead of dying. */
+  | { readonly type: 'revived'; readonly unitId: string; readonly hp: number }
+  /** An enemy left when the room's goal was met (a survived siege, a broken totem). */
+  | { readonly type: 'fled'; readonly unitId: string }
+  /** The place marks cells it will strike next turn (light through the windows). */
+  | { readonly type: 'omen'; readonly cells: readonly Vec2[] }
   /** A status did not take hold (the unit is immune). */
   | { readonly type: 'resisted'; readonly unitId: string; readonly status: string }
   /** A boss enters a new phase (1-based). */

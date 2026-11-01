@@ -19,10 +19,13 @@ const clock = (ms: number) => {
 export function ResultScreen({
   game,
   elapsedMs,
+  ash,
   actions,
 }: {
   game: GameState;
   elapsedMs: number;
+  /** Ash this run earned for the Chapel. */
+  ash: number | null;
   actions: ResultActions;
 }) {
   const p = game.players[0];
@@ -54,6 +57,12 @@ export function ResultScreen({
             <th>{t('result.turns')}</th>
             <td>{turns}</td>
           </tr>
+          {ash !== null && (
+            <tr class="result-ash" data-testid="result-ash">
+              <th>{t('result.ash')}</th>
+              <td>+{ash} ✧</td>
+            </tr>
+          )}
         </tbody>
       </table>
       {p && (

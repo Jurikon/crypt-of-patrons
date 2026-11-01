@@ -77,6 +77,13 @@ const STATE_MIGRATIONS: Record<number, (s: Json) => Json> = {
     version: 10,
     players: (s.players as Json[]).map((p) => ({ counters: [], ...p })),
   }),
+  // v10 → v11 (M6b): Chapel upgrades, second winds.
+  10: (s) => ({
+    ...s,
+    version: 11,
+    players: (s.players as Json[]).map((p) => ({ revives: 0, ...p })),
+    run: s.run ? { perks: [], rerolls: 0, restBonus: 0, ...(s.run as Json) } : null,
+  }),
 };
 
 export function migrateState(raw: unknown): GameState | null {

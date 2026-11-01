@@ -7,6 +7,8 @@ import { abilityName, describeAbility, describeRule, glossary, type GlossaryEntr
 export interface RewardActions {
   /** Take option `index` (null = take nothing); `replace` is the slot a new ability takes over. */
   chooseReward(index: number | null, replace?: number): void;
+  /** Draw new options (a Chapel reroll). */
+  reroll(): void;
 }
 
 type Option = NonNullable<GameState['run']>['offer'][number];
@@ -94,6 +96,28 @@ function terms(o: Option): GlossaryEntry[] {
     case 'upgrade':
       return [];
   }
+}
+
+/**
+ * For a rule that works through tags ("pushes", "summons"): which of your abilities it works with, so
+ * "a modifier for pushes" says "works with Shield bash, Crush".
+ */
+function worksWith(o: Option, p: GameState['players'][number]): string | null {
+  const rule =
+    o.kind === 'modifier'
+      ? getModifier(o.id)
+      : o.kind === 'item'
+        ? getItem(o.id)
+        : o.kind === 'gift'
+          ? getGift(o.id)
+          : null;
+  if (!rule?.requires) return null;
+  const tags = new Set<string>(rule.requires);
+  const names = p.abilities
+    .map((id) => getAbility(id))
+    .filter((a) => a.tags.some((tag) => tags.has(tag)))
+    .map((a) => abilityName(a));
+  return names.length ? t('reward.worksWith', { list: names.join(', ') }) : t('reward.worksWithLater');
 }
 
 function Glossary({ entries }: { entries: readonly GlossaryEntry[] }) {
@@ -193,13 +217,21 @@ export function RewardScreen({ game, actions }: { game: GameState; actions: Rewa
               </div>
             )}
             <div class="reward-desc">{body(o)}</div>
+            {worksWith(o, p) && <div class="reward-works">{worksWith(o, p)}</div>}
             <Glossary entries={terms(o)} />
           </button>
         ))}
       </div>
-      <button type="button" class="reward-skip" onClick={() => actions.chooseReward(null)} data-testid="reward-skip">
-        {t('reward.skip')}
-      </button>
+      <div class="reward-actions">
+        {run.rerolls > 0 && (
+          <button type="button" class="reward-skip" onClick={actions.reroll} data-testid="reward-reroll">
+            ↻ {t('reward.reroll', { n: run.rerolls })}
+          </button>
+        )}
+        <button type="button" class="reward-skip" onClick={() => actions.chooseReward(null)} data-testid="reward-skip">
+          {t('reward.skip')}
+        </button>
+      </div>
     </div>
   );
 }

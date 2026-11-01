@@ -24,4 +24,6 @@ export {
 export { cooldownOf, statOf } from './units';
 export { validTargets } from './targeting';
 export { generateRoom, ROOM_SHAPES, type Door, type Room, type RoomShape } from './gen/room';
+export { ashEarned } from './run';
+export { addAsh, buyPerk, emptyMeta, nextCost, perkLevel, readMeta, type MetaSave } from './meta';
 export { readSave, writeSave, SAVE_VERSION, type SaveFile } from './save';

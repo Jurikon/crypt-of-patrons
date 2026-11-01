@@ -20,7 +20,7 @@ export function App({ store, labels, actions }: { store: Store<ViewState>; label
   const over = (run ? run.phase === 'won' || run.phase === 'lost' : view.game.combat.status !== 'active') && !view.busy;
   const choosing = run?.phase === 'reward' && !view.busy;
   if (view.screen === 'start')
-    return <StartScreen actions={actions} canContinue={view.canContinue} saveError={view.saveError} />;
+    return <StartScreen actions={actions} canContinue={view.canContinue} saveError={view.saveError} meta={view.meta} />;
   const hit = now - view.hitAt < HIT_FLASH_MS;
   return (
     <div class={view.topView ? 'app top-view' : 'app'}>
@@ -54,7 +54,7 @@ export function App({ store, labels, actions }: { store: Store<ViewState>; label
         </div>
       )}
       {choosing && <RewardScreen game={view.game} actions={actions} />}
-      {over && <ResultScreen game={view.game} elapsedMs={view.elapsedMs} actions={actions} />}
+      {over && <ResultScreen game={view.game} elapsedMs={view.elapsedMs} ash={view.ashGained} actions={actions} />}
       {view.debugOpen && <DebugOverlay view={view} actions={actions} />}
     </div>
   );

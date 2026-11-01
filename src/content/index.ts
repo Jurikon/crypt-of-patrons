@@ -1,5 +1,8 @@
 import type {
+  AffixDef,
   BiomeDef,
+  PerkDef,
+  RoomGoal,
   AbilityDef,
   ClassDef,
   EnemyDef,
@@ -693,6 +696,23 @@ export const SURFACES: readonly SurfaceDef[] = [
       },
     ],
   },
+  /** Crypt spike plates: hurt whoever steps on them, every time. */
+  {
+    id: 'spikes',
+    nameKey: 'surface.spikes',
+    hazard: true,
+    triggers: [{ on: 'enterCell', subject: 'foe', effects: [{ kind: 'damage', amount: 2, to: { kind: 'subject' } }] }],
+  },
+  // Catacomb currents: whoever stands in one is carried a cell downstream at the end of each turn.
+  ...([0, 1, 2, 3] as const).map((flow) => ({
+    id: `current${'NESW'[flow]}`,
+    nameKey: 'surface.current',
+    flow,
+    conducts: 'lightning' as const,
+    // Enemies wade around a current when they can: walking against one gets nowhere.
+    hazard: true,
+    triggers: [],
+  })),
   /** The cathedral's holy fire: burns anyone not of its side who steps in or stays. */
   {
     id: 'holyFire',
@@ -1521,7 +1541,7 @@ export const ENEMIES: readonly EnemyDef[] = [
   {
     id: 'drowned',
     nameKey: 'enemy.drowned',
-    maxHp: 6,
+    maxHp: 5,
     move: 1,
     attack: { kind: 'line', damage: 1, range: 4, onHit: [{ kind: 'pull', distance: 2 }] },
     behavior: { kind: 'ranged', minRange: 2, maxRange: 4 },
@@ -1553,7 +1573,7 @@ export const ENEMIES: readonly EnemyDef[] = [
   {
     id: 'drownedMother',
     nameKey: 'enemy.drownedMother',
-    maxHp: 22,
+    maxHp: 18,
     move: 1,
     attack: { kind: 'sweep', damage: 3 },
     pattern: [
@@ -1572,7 +1592,7 @@ export const ENEMIES: readonly EnemyDef[] = [
   {
     id: 'templar',
     nameKey: 'enemy.templar',
-    maxHp: 7,
+    maxHp: 6,
     move: 1,
     attack: { kind: 'melee', damage: 3 },
     behavior: { kind: 'melee' },
@@ -1610,7 +1630,7 @@ export const ENEMIES: readonly EnemyDef[] = [
   {
     id: 'fallenVoice',
     nameKey: 'enemy.fallenVoice',
-    maxHp: 30,
+    maxHp: 26,
     move: 1,
     attack: { kind: 'blast', damage: 3, radius: 1 },
     pattern: [
@@ -1626,7 +1646,7 @@ export const ENEMIES: readonly EnemyDef[] = [
     // At half health the floor cracks with holy fire and it comes down to fight.
     phases: [
       {
-        hpAtMost: 15,
+        hpAtMost: 13,
         move: 2,
         behavior: { kind: 'melee' },
         pattern: [
@@ -1637,6 +1657,90 @@ export const ENEMIES: readonly EnemyDef[] = [
       },
     ],
   },
+];
+
+/** Things in a room rather than fighters (M6b). */
+export const OBJECTS: readonly EnemyDef[] = [
+  {
+    // Break it (it costs a turn) for holy water: heals the heroes next to it, leaves a corpse.
+    id: 'sarcophagus',
+    nameKey: 'enemy.sarcophagus',
+    maxHp: 3,
+    move: 0,
+    attack: { kind: 'melee', damage: 0 },
+    behavior: { kind: 'melee' },
+    model: 'sarcophagus',
+    weight: 0,
+    inert: true,
+    pushFactor: 0,
+    onDeath: [
+      { kind: 'heal', amount: 3, to: { kind: 'around', center: 'self', radius: 1, filter: 'foes' } },
+      { kind: 'surface', surface: 'corpse', at: 'self' },
+    ],
+  },
+  {
+    // A "Totem" room's goal: it calls up an enemy every few turns until it is broken.
+    id: 'totem',
+    nameKey: 'enemy.totem',
+    maxHp: 6,
+    move: 0,
+    attack: { kind: 'melee', damage: 0 },
+    behavior: { kind: 'melee' },
+    model: 'totem',
+    weight: 0,
+    inert: true,
+    pushFactor: 0,
+    spawnEvery: 3,
+  },
+];
+
+/** Elite traits (M6b). */
+export const AFFIXES: readonly AffixDef[] = [
+  { id: 'swift', nameKey: 'affix.swift', icon: '»', move: 1 },
+  {
+    id: 'explosive',
+    nameKey: 'affix.explosive',
+    icon: '✹',
+    onDeath: [{ kind: 'damage', amount: 2, to: { kind: 'around', center: 'self', radius: 1, filter: 'any' } }],
+  },
+  {
+    id: 'vampire',
+    nameKey: 'affix.vampire',
+    icon: '♆',
+    traits: [{ on: 'hit', actor: 'owner', effects: [{ kind: 'heal', amount: 1, to: { kind: 'self' } }] }],
+  },
+  { id: 'shielded', nameKey: 'affix.shielded', icon: '⛉', frontArmor: 2 },
+  {
+    id: 'thorny',
+    nameKey: 'affix.thorny',
+    icon: '✣',
+    traits: [
+      {
+        on: 'damaged',
+        subject: 'owner',
+        tags: ['melee'],
+        effects: [{ kind: 'damage', amount: 1, to: { kind: 'actor' } }],
+      },
+    ],
+  },
+];
+
+/** Chapel upgrades (M6b, GDD 3): bought with Ash between runs, each with a cap. */
+export const PERKS: readonly PerkDef[] = [
+  { id: 'vitality', nameKey: 'perk.vitality', icon: '♥', costs: [4, 8, 12], effect: { kind: 'maxHp', add: 3 } },
+  { id: 'reroll', nameKey: 'perk.reroll', icon: '↻', costs: [5, 10], effect: { kind: 'rerolls', add: 1 } },
+  { id: 'gift', nameKey: 'perk.startModifier', icon: '✦', costs: [8], effect: { kind: 'startModifier' } },
+  { id: 'rest', nameKey: 'perk.restHeal', icon: '☕', costs: [6], effect: { kind: 'restHeal', add: 0.25 } },
+  { id: 'secondWind', nameKey: 'perk.revive', icon: '✚', costs: [12, 20], effect: { kind: 'revive', add: 1 } },
+];
+
+/** How often each room goal shows up on combat doors (act 1, room 1 is always a plain fight). */
+export const GOAL_WEIGHTS: readonly { readonly item: RoomGoal; readonly weight: number }[] = [
+  { item: 'clear', weight: 5 },
+  { item: 'survive', weight: 1 },
+  { item: 'totem', weight: 1 },
+  { item: 'ambush', weight: 1 },
+  { item: 'hunt', weight: 1 },
 ];
 
 /** The three acts' places (GDD 1). */
@@ -1650,7 +1754,8 @@ export const BIOMES: readonly BiomeDef[] = [
       { id: 'ghoul', weight: 1 },
     ],
     boss: 'cryptWarden',
-    features: [],
+    features: [{ surface: 'spikes', patches: 2, size: 1 }],
+    objects: [{ enemy: 'sarcophagus', count: 1 }],
   },
   {
     id: 'catacombs',
@@ -1662,7 +1767,11 @@ export const BIOMES: readonly BiomeDef[] = [
       { id: 'skeletonWarrior', weight: 1 },
     ],
     boss: 'drownedMother',
-    features: [{ surface: 'water', patches: 3, size: 5 }],
+    features: [
+      { surface: 'water', patches: 3, size: 5 },
+      { surface: ['currentN', 'currentE', 'currentS', 'currentW'], patches: 2, size: 4, straight: true },
+    ],
+    spread: { surface: 'water', every: 4, count: 2 },
     // Long flooded halls: fewer pits (the water is the hazard here).
     layout: { shapes: ['rect', 'l', 'cross'], pits: [4, 4, 1, 0] },
   },
@@ -1677,6 +1786,7 @@ export const BIOMES: readonly BiomeDef[] = [
     ],
     boss: 'fallenVoice',
     features: [{ surface: 'holyFire', patches: 2, size: 2 }],
+    omens: { every: 3, damage: 3 },
     // Naves and colonnades.
     layout: {
       shapes: ['rect', 'cross', 'chamfer'],
@@ -1709,6 +1819,19 @@ export const ACT = {
   actHeal: 1,
   /** Reward options offered at once (pick 1 of 3). */
   offer: 3,
+  /** Ash for the Chapel (M6b): per cleared room, per elite room, per boss, for winning the run. */
+  ash: { room: 1, elite: 2, boss: 5, win: 10 },
+  /** Share of max health a second wind gets you back. */
+  reviveShare: 0.5,
+  /** "Survive": turns to hold out, and a wave of two enemies every this many turns. */
+  surviveTurns: 8,
+  waveEvery: 3,
+  /** "Ambush": enemies start this close, one fewer of them. */
+  ambushDistance: 2,
+  /** "Hunt": the leader's extra health. */
+  leaderHp: 3,
+  /** Acts from which one enemy in each fight carries an elite trait. */
+  affixFromAct: 2,
   /** Extra health of elite enemies, and extra enemies in an elite room. */
   eliteHp: 2,
   eliteExtra: 1,
@@ -1732,19 +1855,18 @@ export const DOOR_WEIGHTS: readonly {
 export function encounterWeights(depth: number): readonly { readonly item: number; readonly weight: number }[] {
   if (depth <= 2)
     return [
-      { item: 2, weight: 3 },
-      { item: 3, weight: 4 },
-      { item: 4, weight: 1 },
+      { item: 2, weight: 4 },
+      { item: 3, weight: 3 },
     ];
   if (depth <= 4)
     return [
+      { item: 2, weight: 1 },
       { item: 3, weight: 4 },
-      { item: 4, weight: 3 },
+      { item: 4, weight: 2 },
     ];
   return [
-    { item: 3, weight: 2 },
-    { item: 4, weight: 4 },
-    { item: 5, weight: 2 },
+    { item: 3, weight: 3 },
+    { item: 4, weight: 3 },
   ];
 }
 
@@ -1776,5 +1898,7 @@ export const getHybrid = byId(HYBRIDS, 'hybrid');
 export const getGift = byId(GIFTS, 'gift');
 export const getPatron = byId(PATRONS, 'patron');
 export const getClass = byId(CLASSES, 'class');
-export const getEnemy = byId(ENEMIES, 'enemy');
+export const getEnemy = byId([...ENEMIES, ...OBJECTS], 'enemy');
 export const getBiome = byId(BIOMES, 'biome');
+export const getAffix = byId(AFFIXES, 'affix');
+export const getPerk = byId(PERKS, 'perk');
