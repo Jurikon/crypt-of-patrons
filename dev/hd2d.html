@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HD-2D dungeon test</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #050403;
+        overflow: hidden;
+        font-family: monospace;
+      }
+      canvas.view {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+      .hand {
+        position: absolute;
+        bottom: 0;
+        image-rendering: pixelated;
+        pointer-events: none;
+      }
+      #ui {
+        position: absolute;
+        left: 10px;
+        top: 8px;
+        color: #d8c8a8;
+        font-size: 12px;
+        text-shadow: 1px 1px #000;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="ui">1 / 2 / 3 — biome · Space — swing · drag — look</div>
+    <script type="module" src="./hd2d.ts"></script>
+  </body>
+</html>
