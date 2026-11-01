@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
@@ -36,12 +35,13 @@ import { UnitsView, type UnitVisual } from './unitsView';
 export type Quality = 'high' | 'low';
 
 // The MV look: stone lit by torches in the dark, fire that glows (bloom), the hero's own torch casting
-// shadows, a soft depth of field and a vignette; filmic tone mapping. Per-biome colours in look/rooms.
+// shadows and a vignette; filmic tone mapping. Everything stays sharp: no depth of field. Per-biome colours in look/rooms.
 const FOG_COLOR = 0x0c0806;
 const BACKGROUND = 0x0c0806;
 const HEMI_INTENSITY = 1.5;
 const TORCH_INTENSITY = 3.8;
-const BLOOM = { strength: 0.35, radius: 0.4, threshold: 0.95 };
+/** A faint halo around flames, eyes and runes only: the threshold keeps lit stone out of it. */
+const BLOOM = { strength: 0.16, radius: 0.25, threshold: 1.05 };
 /** Retro pixels: the frame is rendered this many lines tall and scaled up without smoothing. */
 const RETRO_LINES = 400;
 export type { RenderStyle };
@@ -163,7 +163,6 @@ export class GameRenderer {
   private readonly bloom: UnrealBloomPass;
   private readonly fog = new THREE.FogExp2(FOG_COLOR, 0.06);
   private fogDensity = 0.06;
-  private readonly bokeh: BokehPass;
   private style: RenderStyle = 'smooth';
   private flickerFrame = 0;
   private readonly hemi = new THREE.HemisphereLight(0x5a2a70, 0x501008, HEMI_INTENSITY);
@@ -233,8 +232,6 @@ export class GameRenderer {
       new THREE.WebGLRenderTarget(4, 4, { samples: 4, type: THREE.HalfFloatType }),
     );
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.bokeh = new BokehPass(this.scene, this.camera, { focus: 6, aperture: 0.0012, maxblur: 0.005 });
-    this.composer.addPass(this.bokeh);
     const handsPass = new RenderPass(this.handsScene, this.handsCamera);
     handsPass.clear = false;
     handsPass.clearDepth = true;
@@ -298,7 +295,7 @@ export class GameRenderer {
     return /swiftshader|llvmpipe|software|basic render/i.test(name);
   }
 
-  /** High: full pixel density (up to 2×), bloom, depth of field, shadows and particles. Low: 1×, none of those. */
+  /** High: full pixel density (up to 2×), bloom, shadows and particles. Low: 1×, none of those. */
   setQuality(q: Quality): void {
     this.quality = q;
     this.fx.enabled = q === 'high';
@@ -330,8 +327,6 @@ export class GameRenderer {
     this.handsAmbient.color.setHex(look.ambient);
     this.handsAmbient.groundColor.setHex(look.ambientGround);
     this.renderer.toneMappingExposure = look.exposure;
-    // Tall rooms (the cathedral) are focused further away.
-    (this.bokeh.uniforms as Record<string, THREE.IUniform>).focus!.value = look.height > 4 ? 7 : 5.5;
     for (const [i, l] of this.room.lights.entries())
       this.roomLights.push({ light: l.light, base: l.base, a: 9.1 + i, b: 23.7 - i * 0.7 });
 
@@ -827,8 +822,6 @@ export class GameRenderer {
     // Top view: clear the fog, lift the ambient light, drop the ceiling, show the player marker.
     this.fog.density = this.fogDensity * (1 - top);
     this.topLight.intensity = top * 4;
-    // Depth of field is for the first-person view only: from above everything should be sharp.
-    (this.bokeh.uniforms as Record<string, THREE.IUniform>).maxblur!.value = 0.005 * (1 - top);
     this.room.ceiling.visible = top < 0.02;
     this.marker.visible = top > 0.02;
     const p = rig.currentPos(now);
