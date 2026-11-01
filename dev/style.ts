@@ -29,6 +29,8 @@ const top = params.get('view') === 'top';
  * all rendered at the pixel resolution and scaled up crisp.
  */
 const hybrid = params.get('style') === 'hybrid';
+/** Hybrid, smoothed (owner: "more smoothing"): full resolution, multisampled edges, soft textures. ?smooth=0 keeps pixels. */
+const smooth = hybrid && params.get('smooth') !== '0';
 
 /** Internal render height: higher = finer pixels. */
 const LOW_H = Number(params.get('px') ?? (mini ? window.innerHeight : hybrid ? 540 : 480));
@@ -67,11 +69,12 @@ function pixelTexture(
   g.scale(TEX, TEX);
   draw(g, mulberry(seed));
   // Miniatures are painted, not pixelled: soft filtering and only a hint of grain.
-  grain(g, c.width, c.height, mulberry(seed + 99), mini ? 0.1 : 0.22);
+  grain(g, c.width, c.height, mulberry(seed + 99), mini ? 0.1 : smooth ? 0.14 : 0.22);
   const t = new THREE.CanvasTexture(c);
-  t.magFilter = mini ? THREE.LinearFilter : THREE.NearestFilter;
-  t.minFilter = mini ? THREE.LinearMipmapLinearFilter : THREE.NearestFilter;
-  t.generateMipmaps = mini;
+  t.magFilter = mini || smooth ? THREE.LinearFilter : THREE.NearestFilter;
+  t.minFilter = mini || smooth ? THREE.LinearMipmapLinearFilter : THREE.NearestFilter;
+  t.generateMipmaps = mini || smooth;
+  t.anisotropy = smooth ? 8 : 1;
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
@@ -1258,9 +1261,13 @@ function resize() {
   const h = window.innerHeight;
   const lowW = Math.round((LOW_H * w) / h);
   // Hybrid: the whole chain runs at the pixel resolution and the canvas is scaled up by CSS.
-  if (hybrid) renderer.setSize(lowW, LOW_H, false);
+  if (smooth) {
+    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
+    renderer.setSize(w, h, false);
+  } else if (hybrid) renderer.setSize(lowW, LOW_H, false);
   else renderer.setSize(w, h, false);
-  composerResize?.(lowW, LOW_H);
+  if (smooth) composerResize?.(w, h);
+  else composerResize?.(lowW, LOW_H);
   target.setSize(lowW, LOW_H);
   (post.material as THREE.ShaderMaterial).uniforms.uRes!.value.set(lowW, LOW_H);
   // Vertex wobble at a coarser grid than the pixels, so it still reads at high resolution.
@@ -1274,7 +1281,13 @@ build(biome);
 
 // The hybrid look: the scene goes through bloom, a soft depth of field and a vignette at the pixel
 // resolution; the canvas is then shown scaled up without smoothing.
-const composer = hybrid ? new EffectComposer(renderer) : null;
+// Smooth: the chain renders into a multisampled target, so edges are antialiased.
+const composer = hybrid
+  ? new EffectComposer(
+      renderer,
+      smooth ? new THREE.WebGLRenderTarget(4, 4, { samples: 4, type: THREE.HalfFloatType }) : undefined,
+    )
+  : null;
 const bokeh = hybrid ? new BokehPass(scene, camera, { focus: 5.5, aperture: 0.0012, maxblur: 0.005 }) : null;
 if (composer && bokeh) {
   composer.addPass(new RenderPass(scene, camera));
@@ -1291,7 +1304,7 @@ if (composer && bokeh) {
     }),
   );
   composer.addPass(new OutputPass());
-  canvas.style.imageRendering = 'pixelated';
+  canvas.style.imageRendering = smooth ? 'auto' : 'pixelated';
   composerResize = (w, h) => composer.setSize(w, h);
   resize();
 }
