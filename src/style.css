@@ -968,6 +968,21 @@ kbd {
 .door-boss {
   background: #c090ff;
 }
+.door-initiation {
+  background: #f4efe6;
+}
+.door-treasure {
+  background: #ffb050;
+}
+.door-gold {
+  background: #ffd84a;
+}
+.door-merchant {
+  background: #ffa860;
+}
+.door-event {
+  background: #d4a8ff;
+}
 
 .result-stats {
   margin: 8px auto;

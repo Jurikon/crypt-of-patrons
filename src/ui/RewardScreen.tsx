@@ -1,5 +1,16 @@
 import { useState } from 'preact/hooks';
-import { ABILITY_SLOTS, getAbility, getClass, getGift, getItem, getModifier, getPassive, getPatron } from '../content';
+import {
+  ABILITY_SLOTS,
+  getAbility,
+  getClass,
+  getGift,
+  getItem,
+  getModifier,
+  getPassive,
+  getPatron,
+  getSummon,
+  type RuleDef,
+} from '../content';
 import { t, type TextKey } from '../i18n';
 import type { GameState } from '../sim';
 import { abilityName, describeAbility, describeRule, glossary, type GlossaryEntry } from './describe';
@@ -117,6 +128,15 @@ export function worksWith(o: Option, p: GameState['players'][number]): string | 
     .map((id) => getAbility(id))
     .filter((a) => a.tags.some((tag) => tags.has(tag)))
     .map((a) => abilityName(a));
+  // Allies can also come from items and gifts you hold (a skeleton at the start of each room).
+  if (tags.has('summon')) {
+    const raises = (r: RuleDef) =>
+      [...(r.onGain ?? []), ...r.triggers.flatMap((tr) => tr.effects)].some(
+        (e) => e.kind === 'summon' && !getSummon(e.unit).inert,
+      );
+    for (const r of [...p.items.map(getItem), ...p.gifts.map(getGift)])
+      if (raises(r)) names.push(t(r.nameKey as TextKey));
+  }
   return names.length ? t('reward.worksWith', { list: names.join(', ') }) : t('reward.worksWithLater');
 }
 

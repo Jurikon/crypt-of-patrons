@@ -12,6 +12,7 @@ import {
   GIFTS,
   GOAL_WEIGHTS,
   getPerk,
+  getSummon,
   HYBRIDS,
   PATRONS,
   ITEMS,
@@ -83,7 +84,8 @@ function fits(p: Player, rule: RuleDef): boolean {
   const effects = heroEffects(p);
   if (rule.requires) {
     const tags = new Set(reachableAbilities(p).flatMap((id) => getAbility(id).tags));
-    if (effects.some((e) => e.kind === 'summon')) tags.add('summon');
+    // A decoy that never acts is not an ally summon rules can do anything with.
+    if (effects.some((e) => e.kind === 'summon' && !getSummon(e.unit).inert)) tags.add('summon');
     if (!rule.requires.some((t) => tags.has(t))) return false;
   }
   if (rule.requiresStatus && !effects.some((e) => e.kind === 'status' && e.status === rule.requiresStatus))

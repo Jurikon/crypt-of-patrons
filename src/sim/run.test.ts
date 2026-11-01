@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { dirVec, type Dir } from '../core/grid';
-import { ACT } from '../content';
+import { createRng } from '../core/rng';
+import { ACT, getItem, getModifier } from '../content';
 import { apply } from './apply';
 import type { Command, GameEvent } from './commands';
 import { isInert } from './enemies';
-import { enterRoom } from './run';
+import { enterRoom, makeOffer } from './run';
 import { createGame, type GameState } from './state';
 import { stateFromMap } from './testing';
 
@@ -250,5 +251,21 @@ describe('boss: the crypt warden', () => {
     const r = apply(apply(boss, killAll).state, choose(0));
     expect(r.state.run!.phase).toBe('won');
     expect(of(r.events, 'runEnded')).toEqual([{ type: 'runEnded', result: 'won' }]);
+  });
+});
+
+describe('offers fit the build', () => {
+  it('a rogue whose only "summon" is the inert decoy of the mirror dagger is not offered summon rules', () => {
+    const s = createGame(1, { classId: 'rogue' });
+    const p = structuredClone(s.players[0]!);
+    p.items = [...p.items, 'item.mirrorDagger'];
+    for (let seed = 0; seed < 200; seed++) {
+      for (const kind of ['modifier', 'treasure'] as const) {
+        for (const o of makeOffer(createRng(seed), p, kind)) {
+          const rule = o.kind === 'modifier' ? getModifier(o.id) : o.kind === 'item' ? getItem(o.id) : null;
+          expect(rule?.requires ?? [], rule?.id).not.toContain('summon');
+        }
+      }
+    }
   });
 });
