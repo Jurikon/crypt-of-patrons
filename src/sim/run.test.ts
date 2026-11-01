@@ -186,7 +186,7 @@ describe('boss: the crypt warden', () => {
     expect(r.state.enemies.map((e) => e.type)).toEqual(['cryptWarden']);
   });
 
-  it('Sweep hits the three cells in front of it; every third strike it calls two warriors on the cells it showed', () => {
+  it('Sweep hits the three cells in front of it; every third strike it calls a warrior on the cell it showed', () => {
     const s = stateFromMap(
       `
       #########
@@ -215,11 +215,11 @@ describe('boss: the crypt warden', () => {
     const next = r2.state.enemies.find((e) => e.type === 'cryptWarden')!.intent!;
     expect(next.kind).toBe('summon');
     const cells = next.kind === 'summon' ? next.cells : [];
-    expect(cells).toHaveLength(2);
+    expect(cells).toHaveLength(1);
     const r4 = apply(r2.state, { type: 'move', playerId: 'p1', dir: 'left' });
     const spawned = r4.events.filter((e) => e.type === 'summoned');
     expect(spawned.map((e) => (e.type === 'summoned' ? e.at : null))).toEqual(cells);
-    expect(r4.state.enemies.filter((e) => e.type === 'skeletonWarrior').length).toBe(2);
+    expect(r4.state.enemies.filter((e) => e.type === 'skeletonWarrior').length).toBe(1);
   });
 
   it('pushes move the warden half as far', () => {

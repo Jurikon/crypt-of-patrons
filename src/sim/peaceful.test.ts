@@ -173,6 +173,7 @@ describe('merchant (M6c)', () => {
       let seen = 0;
       for (let depth = 1; depth < ACT.rooms; depth++) {
         s = clearRoom(s);
+        if (!s.run!.doors.length) break;
         const m = s.run!.doors.findIndex((d) => d.reward === 'merchant');
         if (m >= 0) {
           seen++;
@@ -325,6 +326,8 @@ describe('events (M6c)', () => {
       const met: string[] = [];
       for (let depth = 1; depth < ACT.rooms; depth++) {
         s = clearRoom(s);
+        // A "survive" room is not won by killing everyone: stop this walk there.
+        if (!s.run!.doors.length) break;
         for (const d of s.run!.doors.filter((x) => x.reward === 'event')) {
           const def = getEvent(d.event!);
           if (def.biomes) expect(def.biomes).toContain('crypt');

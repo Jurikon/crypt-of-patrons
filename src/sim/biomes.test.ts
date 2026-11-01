@@ -280,8 +280,8 @@ describe('act 3, the Cathedral of the Fallen God', () => {
     );
     expect(s.enemies[0]!.intent).toMatchObject({ kind: 'blast' });
     const r = apply(s, use('knight.sword'));
-    // The blast (3), then the holy fire it left under your feet as the turn ends (2): step out in time.
-    expect(me(r.state).hp).toBe(me(s).hp - 5);
+    // The blast (2), then the holy fire it left under your feet as the turn ends (2): step out in time.
+    expect(me(r.state).hp).toBe(me(s).hp - 4);
     expect(r.state.surfaces.filter((x) => x.id === 'holyFire').length).toBe(9);
   });
 

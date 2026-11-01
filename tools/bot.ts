@@ -60,7 +60,7 @@ function bestAbility(state: GameState): Command | null {
   return best && best.score > 0 ? best.cmd : null;
 }
 
-const DIRS = [
+export const DIRS = [
   { x: 0, y: -1 },
   { x: 1, y: 0 },
   { x: 0, y: 1 },
@@ -68,7 +68,7 @@ const DIRS = [
 ];
 
 /** Turn towards `want`, or null if already facing it. */
-function face(playerId: string, dir: number, want: number): Command | null {
+export function face(playerId: string, dir: number, want: number): Command | null {
   if (want === dir) return null;
   return { type: 'turn', playerId, dir: (want - dir + 4) % 4 === 1 ? 'right' : 'left' };
 }
@@ -79,7 +79,7 @@ function stepTowardsEnemies(state: GameState): number {
 }
 
 /** First step direction of a shortest walk over free floor to a cell passing `goal`, or -1. */
-function firstStep(state: GameState, goal: (x: number, y: number) => boolean): number {
+export function firstStep(state: GameState, goal: (x: number, y: number) => boolean): number {
   const g = state.room.grid;
   const p = state.players[0]!;
   // Own summons are no obstacle: walking into one trades places with it.
@@ -124,6 +124,20 @@ export function carefulAction(_rng: Rng, state: GameState): Command {
     const turn = face(id, p.dir, d);
     const hit: Command = { type: 'useAbility', playerId: id, abilityId: p.abilities[0]! };
     plans.push(turn ? (d === (p.dir + 2) % 4 ? [turn, turn, hit] : [turn, hit]) : [hit]);
+  }
+  // Step, then turn to an enemy next to you and hit: how it learns to get round behind (backstabs).
+  for (const dir of ['forward', 'left', 'right'] as const) {
+    const step: Command = { type: 'move', playerId: id, dir };
+    const after = apply(state, step);
+    if (after.events.some((e) => e.type === 'rejected' || e.type === 'bumped')) continue;
+    const q = after.state.players[0]!;
+    for (let d = 0; d < 4; d++) {
+      const foe = after.state.enemies.find((e) => e.x === q.x + DIRS[d]!.x && e.y === q.y + DIRS[d]!.y);
+      if (!foe) continue;
+      const turn = face(id, q.dir, d);
+      const hit: Command = { type: 'useAbility', playerId: id, abilityId: p.abilities[0]! };
+      plans.push(turn ? (d === (q.dir + 2) % 4 ? [step, turn, turn, hit] : [step, turn, hit]) : [step, hit]);
+    }
   }
   for (const abilityId of p.abilities.slice(1)) {
     if (p.cooldowns.some((c) => c.abilityId === abilityId)) continue;

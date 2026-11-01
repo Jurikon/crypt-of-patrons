@@ -771,7 +771,8 @@ export const ITEMS: readonly RuleDef[] = [
     triggers: (['turnStart', 'roomStart'] as const).map((on) => ({
       on,
       ...(on === 'turnStart' ? { subject: 'owner' as const } : {}),
-      effects: [{ kind: 'shield' as const, amount: 6, turns: 1, to: { kind: 'self' as const } }],
+      // 3, not 6 (M6c balance report): with 6 no ordinary blow got through (98% of runs with it won), with 4 still 90%.
+      effects: [{ kind: 'shield' as const, amount: 3, turns: 1, to: { kind: 'self' as const } }],
     })),
   },
   {
@@ -1503,7 +1504,8 @@ export const ENEMIES: readonly EnemyDef[] = [
     pattern: [
       { kind: 'sweep', damage: 3 },
       { kind: 'sweep', damage: 3 },
-      { kind: 'summon', unit: 'skeletonWarrior', count: 2 },
+      // One, not two (M6c balance report: the act 1 boss ended a quarter of all runs).
+      { kind: 'summon', unit: 'skeletonWarrior', count: 1 },
     ],
     behavior: { kind: 'melee' },
     model: 'warden',
@@ -1632,13 +1634,14 @@ export const ENEMIES: readonly EnemyDef[] = [
   {
     id: 'fallenVoice',
     nameKey: 'enemy.fallenVoice',
-    maxHp: 26,
+    // 22 (was 26), blasts 2 (were 3), phase at 11, sweep 3 (was 4): M6c balance report, a third of runs ended here.
+    maxHp: 22,
     move: 1,
-    attack: { kind: 'blast', damage: 3, radius: 1 },
+    attack: { kind: 'blast', damage: 2, radius: 1 },
     pattern: [
-      { kind: 'blast', damage: 3, radius: 1, surface: { id: 'holyFire', turns: 3 } },
+      { kind: 'blast', damage: 2, radius: 1, surface: { id: 'holyFire', turns: 3 } },
       { kind: 'summon', unit: 'acolyte', count: 1 },
-      { kind: 'blast', damage: 3, radius: 1, surface: { id: 'holyFire', turns: 3 } },
+      { kind: 'blast', damage: 2, radius: 1, surface: { id: 'holyFire', turns: 3 } },
     ],
     behavior: { kind: 'ranged', minRange: 3, maxRange: 6 },
     model: 'voice',
@@ -1648,11 +1651,11 @@ export const ENEMIES: readonly EnemyDef[] = [
     // At half health the floor cracks with holy fire and it comes down to fight.
     phases: [
       {
-        hpAtMost: 13,
+        hpAtMost: 11,
         move: 2,
         behavior: { kind: 'melee' },
         pattern: [
-          { kind: 'sweep', damage: 4 },
+          { kind: 'sweep', damage: 3 },
           { kind: 'burst', damage: 3, radius: 1 },
         ],
         onEnter: [{ kind: 'scatterSurface', surface: 'holyFire', count: 8 }],
@@ -1840,10 +1843,13 @@ export const ACT = {
   eliteHp: 2,
   eliteExtra: 1,
   /** Gold (M6c): per cleared room (a range), extra for elite and boss rooms, and a gold door's pouch. */
-  gold: { room: [3, 5], elite: 5, boss: 10, door: [12, 18] },
-  /** The merchant shows up once per act, behind a door into one of rooms merchantFrom..merchantBy. */
-  merchantFrom: 2,
-  merchantBy: 4,
+  gold: { room: [5, 8], elite: 8, boss: 15, door: [14, 20] },
+  /**
+   * The merchant shows up once per act, behind a door into one of rooms merchantFrom..merchantBy: late
+   * enough that the purse has something in it.
+   */
+  merchantFrom: 3,
+  merchantBy: 5,
   /** Event rooms at most per act. */
   maxEvents: 2,
 } as const;
@@ -1853,13 +1859,13 @@ export const SHOP = {
   /** Abilities or modifiers on sale, and items. */
   rules: 2,
   items: 2,
-  price: { ability: 20, modifier: 15, item: 25, cursedItem: 15 },
+  price: { ability: 16, modifier: 12, item: 20, cursedItem: 12 },
   /** Healing: share of max health, and its price. */
-  heal: { share: 0.5, price: 10 },
+  heal: { share: 0.5, price: 8 },
   /** Taking off a cursed item. */
-  uncurse: 15,
+  uncurse: 12,
   /** New wares. */
-  reroll: 5,
+  reroll: 4,
 } as const;
 
 /** Event rooms (M6c): a choice with its price in plain sight. The last option is always walking away. */

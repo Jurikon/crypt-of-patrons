@@ -471,7 +471,7 @@
   "door.gold": "Gold",
   "door.merchant": "Merchant",
   "door.event": "Event",
-  "door.gold.hint": "A fight, then a pouch of 12–18 gold",
+  "door.gold.hint": "A fight, then a pouch of 14–20 gold",
   "door.merchant.hint": "No fight: a merchant sells for gold",
   "door.event.hint": "No fight: a choice with its price in plain sight",
   "hud.gold": "Gold",

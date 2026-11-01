@@ -383,7 +383,7 @@ describe('items', () => {
     expect(r.state.players[0]!.hp).toBe(14);
   });
 
-  it('Stone heart: health drops to 1, a 6-point shield returns every turn', () => {
+  it('Stone heart: health drops to 1, a 3-point shield returns every turn', () => {
     let s = createGame(2);
     s = apply(s, { type: 'debugItem', playerId: 'p1', itemId: 'item.stoneHeart' }).state;
     expect(s.players[0]).toMatchObject({ hp: 1, maxHp: 1 });
