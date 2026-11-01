@@ -454,6 +454,8 @@ export interface EnemyDef {
   readonly inert?: boolean;
   /** Calls up one enemy of the biome every this many turns (a totem). */
   readonly spawnEvery?: number;
+  /** ...but only while fewer than this many fighters are in the room. */
+  readonly spawnWhileBelow?: number;
 }
 
 /** An elite's trait (M6b): shown over its head, changes how it must be fought. */

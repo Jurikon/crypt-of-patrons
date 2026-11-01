@@ -1679,10 +1679,11 @@ export const OBJECTS: readonly EnemyDef[] = [
     ],
   },
   {
-    // A "Totem" room's goal: it calls up an enemy every few turns until it is broken.
+    // A "Totem" room's goal: it calls up an enemy every few turns until it is broken (owner: every 3
+    // turns with no limit was unbeatable).
     id: 'totem',
     nameKey: 'enemy.totem',
-    maxHp: 6,
+    maxHp: 5,
     move: 0,
     attack: { kind: 'melee', damage: 0 },
     behavior: { kind: 'melee' },
@@ -1690,7 +1691,8 @@ export const OBJECTS: readonly EnemyDef[] = [
     weight: 0,
     inert: true,
     pushFactor: 0,
-    spawnEvery: 3,
+    spawnEvery: 5,
+    spawnWhileBelow: 3,
   },
 ];
 

@@ -559,8 +559,9 @@ export function advanceEnemies(eng: Engine): void {
     if (!e || livingPlayers(state).length === 0 || state.combat.status !== 'active') continue;
     // Things never move or strike; a totem calls up help on its beat.
     if (isInert(e)) {
-      const every = getEnemy(e.type).spawnEvery;
-      if (every && state.combat.turn % every === 0) spawnNear(eng, e);
+      const { spawnEvery: every, spawnWhileBelow: cap } = getEnemy(e.type);
+      const fighters = state.enemies.filter((x) => !isInert(x)).length;
+      if (every && state.combat.turn % every === 0 && fighters < (cap ?? Infinity)) spawnNear(eng, e);
       continue;
     }
     checkPhase(eng, e);

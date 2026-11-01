@@ -129,7 +129,7 @@ describe('room goals', () => {
     expect(s.run!.phase).not.toBe('combat');
   });
 
-  it('Totem: it calls up an enemy every few turns; breaking it wins, the rest run off', () => {
+  it('Totem: it calls up an enemy every 5 turns; breaking it wins, the rest run off', () => {
     const s = map(`
       #######
       #>T...#
@@ -138,13 +138,12 @@ describe('room goals', () => {
       #######`);
     s.combat.goal = 'totem';
     s.combat.goalTarget = 'e1';
-    let st = s;
-    for (let i = 0; i < 2; i++) {
-      me(st).god = true;
-      st = apply(st, { type: 'move', playerId: 'p1', dir: 'right' }).state;
-      st = apply(st, { type: 'move', playerId: 'p1', dir: 'left' }).state;
-    }
-    expect(st.enemies.length).toBeGreaterThan(2);
+    // Turn 5 is its beat.
+    s.combat.turn = 5;
+    me(s).god = true;
+    let st = apply(s, { type: 'move', playerId: 'p1', dir: 'right' }).state;
+    st = apply(st, { type: 'move', playerId: 'p1', dir: 'left' }).state;
+    expect(st.enemies.length).toBe(3);
     // Face it again and break it.
     st = apply(st, { type: 'turn', playerId: 'p1', dir: 'left' }).state;
     while (me(st).dir !== 1) st = apply(st, { type: 'turn', playerId: 'p1', dir: 'right' }).state;
@@ -152,6 +151,34 @@ describe('room goals', () => {
     const r = apply(st, swing);
     expect(r.state.combat.status).toBe('won');
     expect(of(r.events, 'fled').length).toBeGreaterThan(0);
+  });
+
+  it('owner report: a totem stops calling while 3 fighters are already up', () => {
+    const s = map(`
+      ########
+      #>T....#
+      #......#
+      #..G.G.#
+      #....G.#
+      ########`);
+    s.combat.goal = 'totem';
+    s.combat.goalTarget = 'e1';
+    s.combat.turn = 5;
+    me(s).god = true;
+    const r = apply(s, { type: 'move', playerId: 'p1', dir: 'right' });
+    expect(of(r.events, 'summoned')).toHaveLength(0);
+    // With fewer fighters it calls again on its beat.
+    const t = map(`
+      ########
+      #>T....#
+      #......#
+      #....G.#
+      ########`);
+    t.combat.goal = 'totem';
+    t.combat.goalTarget = 'e1';
+    t.combat.turn = 5;
+    me(t).god = true;
+    expect(of(apply(t, { type: 'move', playerId: 'p1', dir: 'right' }).events, 'summoned')).toHaveLength(1);
   });
 
   it('Hunt: the leader is tougher and has a trait; killing it wins', () => {
