@@ -3,7 +3,7 @@ import { dirVec } from '../core/grid';
 import { getPatron, type RewardKind } from '../content';
 import type { GameState } from '../sim';
 import { CELL } from './dims';
-import { planks, solid } from './look/textures';
+import { mulberry, planks, solid } from './look/textures';
 
 /** Light colour per reward, so a door reads at a glance (labels add the words). */
 export const REWARD_COLORS: Record<RewardKind, number> = {
@@ -45,19 +45,23 @@ interface DoorRig {
   } | null;
 }
 
-/** Light fading away from the door (v) in uneven streaks (u): the alpha of the rays and the floor pool. */
-function raysTexture(): THREE.CanvasTexture {
+/**
+ * Soft light: brightest along the middle (u = 0.5) and near the door (v = 0), fading to nothing at
+ * every edge, so no shaft or pool ever shows a hard border. The alpha of the rays and the floor pool.
+ */
+function softTexture(): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = 64;
   c.height = 64;
   const g = c.getContext('2d')!;
   const img = g.createImageData(64, 64);
   for (let x = 0; x < 64; x++) {
-    const streak = 0.55 + 0.45 * Math.sin(x * 0.7) * Math.sin(x * 0.23 + 1.3);
-    const edge = Math.min(1, Math.min(x, 63 - x) / 10);
+    const across = Math.sin((x / 63) * Math.PI) ** 2;
     for (let y = 0; y < 64; y++) {
-      const fade = (1 - y / 63) ** 1.6;
-      const a = Math.round(255 * fade * streak * edge);
+      const v = y / 63;
+      // A quick rise just past the door (no seam where a shaft starts), then a long fade.
+      const along = Math.min(1, v * 8) * (1 - v) ** 1.8;
+      const a = Math.round(255 * across * along);
       const i = (y * 64 + x) * 4;
       img.data[i] = img.data[i + 1] = img.data[i + 2] = a;
       img.data[i + 3] = 255;
@@ -70,43 +74,42 @@ function raysTexture(): THREE.CanvasTexture {
 }
 
 /**
- * A frustum of light from the doorway (local z = 0, the opening) widening and dropping towards the
- * floor as it reaches into the room (local −z). v runs from the door outwards, for the fade.
+ * Shafts of light from the doorway (local z = 0, the opening) slanting down into the room (local −z).
+ * Each shaft is two crossed strips widening as they go, so it reads as a soft beam from any side.
+ * Seeded, so a door always pours the same way.
  */
-function raysGeometry(): THREE.BufferGeometry {
-  const near = { w: OPEN_W / 2, top: OPEN_H, bottom: 0 };
-  const far = { w: OPEN_W / 2 + 0.9, top: 0.9, bottom: 0, z: -SPILL };
-  const n = [
-    [-near.w, near.bottom, 0],
-    [near.w, near.bottom, 0],
-    [near.w, near.top, 0],
-    [-near.w, near.top, 0],
-  ];
-  const f = [
-    [-far.w, far.bottom, far.z],
-    [far.w, far.bottom, far.z],
-    [far.w, far.top, far.z],
-    [-far.w, far.top, far.z],
-  ];
+function raysGeometry(seed: number): THREE.BufferGeometry {
+  const r = mulberry(seed);
   const pos: number[] = [];
   const uv: number[] = [];
-  // Sides: right, top, left (the floor gets its own pool).
-  for (const [a, b] of [
-    [1, 2],
-    [2, 3],
-    [3, 0],
-  ] as const) {
-    const quad = [n[a]!, n[b]!, f[b]!, f[a]!];
-    const quv = [
-      [0, 0],
-      [1, 0],
-      [1, 1],
-      [0, 1],
+  const quv = [
+    [0, 0],
+    [1, 0],
+    [1, 1],
+    [0, 1],
+  ] as const;
+  const strip = (from: THREE.Vector3, to: THREE.Vector3, side: THREE.Vector3, w0: number, w1: number) => {
+    const corners = [
+      from.clone().addScaledVector(side, -w0 / 2),
+      from.clone().addScaledVector(side, w0 / 2),
+      to.clone().addScaledVector(side, w1 / 2),
+      to.clone().addScaledVector(side, -w1 / 2),
     ];
     for (const i of [0, 1, 2, 0, 2, 3]) {
-      pos.push(...quad[i]!);
-      uv.push(...quv[i]!);
+      pos.push(corners[i]!.x, corners[i]!.y, corners[i]!.z);
+      uv.push(quv[i]![0], quv[i]![1]);
     }
+  };
+  for (let i = 0; i < 9; i++) {
+    const from = new THREE.Vector3((r() - 0.5) * (OPEN_W - 0.3), 0.5 + r() * (OPEN_H - 0.7), 0.05);
+    // Down and into the room, fanning out a little to the sides.
+    const dir = new THREE.Vector3((r() - 0.5) * 0.5, -0.35 - r() * 0.25, -1).normalize();
+    const to = from.clone().addScaledVector(dir, SPILL * (0.7 + r() * 0.5));
+    const flat = new THREE.Vector3(-dir.z, 0, dir.x).normalize();
+    const up = new THREE.Vector3().crossVectors(flat, dir).normalize();
+    const w = 0.25 + r() * 0.35;
+    strip(from, to, flat, w, w * 2.4);
+    strip(from, to, up, w, w * 2.4);
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
@@ -136,9 +139,8 @@ export class DoorsView {
   private readonly bandGeometry = new THREE.BoxGeometry(OPEN_W - 0.02, 0.07, 0.1);
   private readonly ringGeometry = new THREE.TorusGeometry(0.07, 0.014, 6, 14);
   private readonly glowGeometry = new THREE.PlaneGeometry(CELL, GLOW_H);
-  private readonly raysGeo = raysGeometry();
   private readonly poolGeo = poolGeometry();
-  private readonly raysMap = raysTexture();
+  private readonly raysMap = softTexture();
   private readonly wood = new THREE.MeshStandardMaterial({ map: planks(0x4a2e18, 501), roughness: 0.85 });
   private readonly iron = new THREE.MeshStandardMaterial({
     map: solid(0x3a3634, 502, 0x5a3010),
@@ -222,7 +224,10 @@ export class DoorsView {
           .addScaledVector(outV, CELL * 0.95)
           .setY(GLOW_H / 2);
         glow.rotation.y = ry;
-        const rays = new THREE.Mesh(this.raysGeo, additive(color.clone().multiplyScalar(0.55), this.raysMap));
+        const rays = new THREE.Mesh(
+          raysGeometry(door.x * 31 + door.y * 17),
+          additive(color.clone().multiplyScalar(0.45), this.raysMap),
+        );
         const pool = new THREE.Mesh(this.poolGeo, additive(color.clone().multiplyScalar(0.7), this.raysMap));
         for (const m of [rays, pool]) {
           m.position.copy(face);
@@ -262,6 +267,7 @@ export class DoorsView {
       if (d.lit) {
         this.group.remove(d.lit.glow, d.lit.rays, d.lit.pool);
         d.lit.glow.material.dispose();
+        d.lit.rays.geometry.dispose();
         d.lit.rays.material.dispose();
         d.lit.pool.material.dispose();
       }
@@ -272,14 +278,7 @@ export class DoorsView {
 
   dispose(): void {
     this.clear();
-    for (const g of [
-      this.leafGeometry,
-      this.bandGeometry,
-      this.ringGeometry,
-      this.glowGeometry,
-      this.raysGeo,
-      this.poolGeo,
-    ])
+    for (const g of [this.leafGeometry, this.bandGeometry, this.ringGeometry, this.glowGeometry, this.poolGeo])
       g.dispose();
     this.raysMap.dispose();
     this.wood.dispose();
