@@ -1249,6 +1249,14 @@ window.addEventListener('pointermove', (e) => {
 });
 window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') swingStart = performance.now();
+  // P: switch between the smooth look and retro pixels (the game will offer the same in its settings).
+  if (e.code === 'KeyP' && hybrid) {
+    const next = new URLSearchParams(location.search);
+    next.set('biome', biome);
+    if (smooth) next.set('smooth', '0');
+    else next.delete('smooth');
+    location.search = next.toString();
+  }
   const b = ({ Digit1: 'crypt', Digit2: 'catacombs', Digit3: 'cathedral' } as Record<string, Biome>)[e.code];
   if (b) {
     biome = b;
