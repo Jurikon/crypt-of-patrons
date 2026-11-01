@@ -64,7 +64,7 @@ export function roomLook(biome: string): RoomLook {
           ambient: 0x2a4a40,
           ambientGround: 0x0a1410,
           torch: 0xd8e89a,
-          exposure: 1.35,
+          exposure: 1.05,
           wall: bricks(0x56665a, 0x1c2420, 11, 1, true),
           floor: flagstones(0x4e5e54, 12),
           ceiling: bricks(0x3a4a40, 0x141c18, 13, 0.5),
@@ -82,11 +82,11 @@ export function roomLook(biome: string): RoomLook {
             ambient: 0x5a4c3c,
             ambientGround: 0x1a1208,
             torch: 0xffd890,
-            exposure: 1.3,
-            wall: bricks(0xb8ac94, 0x5a5040, 21),
-            floor: checker(0xd8d0c0, 0x1e1a18, 22),
+            exposure: 0.95,
+            wall: bricks(0x9a8e78, 0x4a4234, 21),
+            floor: checker(0xa8a092, 0x1e1a18, 22),
             ceiling: bricks(0x8a806c, 0x3a3428, 23),
-            trim: bricks(0xc8bca4, 0x6a6050, 25),
+            trim: bricks(0xa89c86, 0x5a5042, 25),
             pitGlow: 0x3a2a10,
             pillar: 'column',
             decor: 'windows',
@@ -99,7 +99,7 @@ export function roomLook(biome: string): RoomLook {
             ambient: 0x4a3828,
             ambientGround: 0x140c08,
             torch: 0xffa850,
-            exposure: 1.35,
+            exposure: 1.05,
             wall: bricks(0x86735e, 0x2a2018, 1),
             floor: flagstones(0x76685a, 2),
             ceiling: bricks(0x5a4c3e, 0x1a1410, 3),
@@ -157,7 +157,7 @@ export function buildRoom(grid: Grid, look: RoomLook, seed: number): RoomMeshes 
   const trimM = std(look.trim);
   const pitM = std(look.wall, 0x3a3a3a);
   const darkM = new THREE.MeshBasicMaterial({ color: 0x020101 });
-  const glowM = new THREE.MeshBasicMaterial({ color: new THREE.Color(look.pitGlow).multiplyScalar(2) });
+  const glowM = new THREE.MeshBasicMaterial({ color: new THREE.Color(look.pitGlow).multiplyScalar(1.4) });
   disposables.push(darkM, glowM);
   const buckets = new Map<THREE.Material, THREE.BufferGeometry[]>();
   const ceilBuckets = new Map<THREE.Material, THREE.BufferGeometry[]>();
@@ -302,16 +302,17 @@ export function buildRoom(grid: Grid, look: RoomLook, seed: number): RoomMeshes 
     const flame = flameTexture(Math.floor(at.x * 13 + at.z * 7));
     flames.push(flame);
     disposables.push(flame.texture);
-    const sm = new THREE.SpriteMaterial({ map: flame.texture, color: new THREE.Color(1.7, 1.35, 1.0), fog: false });
+    const sm = new THREE.SpriteMaterial({ map: flame.texture, color: new THREE.Color(1.35, 1.1, 0.85), fog: false });
     disposables.push(sm);
     const sprite = new THREE.Sprite(sm);
     sprite.scale.set(0.3, 0.6, 1);
     sprite.position.set(at.x + nx * 0.45, 2.42, at.z + nz * 0.45);
     group.add(sprite);
-    const light = new THREE.PointLight(look.torch, 5, 9, 1.5);
-    light.position.set(at.x + nx * 0.8, 2.3, at.z + nz * 0.8);
+    // Set off from the wall, or the stone right behind the flame burns white.
+    const light = new THREE.PointLight(look.torch, 2.4, 9, 1.6);
+    light.position.set(at.x + nx * 1.1, 2.3, at.z + nz * 1.1);
     group.add(light);
-    lights.push({ light, base: 5, phase: at.x * 1.7 + at.z * 0.9 });
+    lights.push({ light, base: 2.4, phase: at.x * 1.7 + at.z * 0.9 });
   }
 
   const free = order.map(({ f }) => f).filter((f) => !torchFaces.has(faces.indexOf(f)));
@@ -368,7 +369,7 @@ export function buildRoom(grid: Grid, look: RoomLook, seed: number): RoomMeshes 
       group.add(w);
       disposables.push(w.geometry);
       if (coloured++ < 3) {
-        const l = new THREE.PointLight(0xc0a0ff, 3, 8, 1.4);
+        const l = new THREE.PointLight(0xc0a0ff, 2, 8, 1.4);
         l.position
           .copy(f.at)
           .setY(H * 0.5)

@@ -29,8 +29,8 @@ function arm(gauntlet: THREE.Material) {
 
 function knight(): Kit {
   const root = new THREE.Group();
-  const gauntlet = mat(solid(0xc8c8cc, 171, 0x8a8a90), { metalness: 0.15 });
-  const steel = mat(solid(0xb0b4bc, 172, 0x8a9098), { metalness: 0.15, roughness: 0.4 });
+  const gauntlet = mat(solid(0x8a8c92, 171, 0x5a5c62), { metalness: 0.15 });
+  const steel = mat(solid(0x9094a0, 172, 0x6a7078), { metalness: 0.15, roughness: 0.4 });
   const right = arm(gauntlet);
   const sword = new THREE.Group();
   sword.add(box(0.04, 0.16, 0.04, mat(planks(0x3a2414, 174)), 0, 0.02, 0));

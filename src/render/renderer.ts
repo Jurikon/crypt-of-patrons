@@ -21,6 +21,7 @@ import {
 } from '../sim';
 import { CameraRig, cellCenter } from './cameraRig';
 import { HandsView } from './look/hands';
+import { TORCH_AHEAD, TORCH_REACH, torchAheadFor, torchDimming } from './look/torch';
 import { buildRoom, roomLook, type RoomMeshes } from './look/rooms';
 import { setTextureStyle, type RenderStyle } from './look/textures';
 import { CELL, WALL_H } from './dims';
@@ -38,9 +39,9 @@ export type Quality = 'high' | 'low';
 // shadows, a soft depth of field and a vignette; filmic tone mapping. Per-biome colours in look/rooms.
 const FOG_COLOR = 0x0c0806;
 const BACKGROUND = 0x0c0806;
-const HEMI_INTENSITY = 2.4;
-const TORCH_INTENSITY = 11;
-const BLOOM = { strength: 0.45, radius: 0.4, threshold: 0.88 };
+const HEMI_INTENSITY = 1.5;
+const TORCH_INTENSITY = 3.8;
+const BLOOM = { strength: 0.35, radius: 0.4, threshold: 0.95 };
 /** Retro pixels: the frame is rendered this many lines tall and scaled up without smoothing. */
 const RETRO_LINES = 400;
 export type { RenderStyle };
@@ -169,7 +170,14 @@ export class GameRenderer {
   // Shallow falloff: bright enough across the room without blowing out walls at arm's length.
   private readonly torch = new THREE.PointLight(0xffb070, TORCH_INTENSITY, 18, 1.1);
   // A soft warm fill on what the hero holds, from the same torch.
-  private readonly handFill = new THREE.PointLight(0xffb070, 0.6, 1.2, 1);
+  /**
+   * The hands are drawn in a pass of their own, over the room, with their own steady light: the torch
+   * right above them would burn them white, and they never poke into a wall.
+   */
+  private readonly handsScene = new THREE.Scene();
+  private readonly handsCamera = new THREE.PerspectiveCamera(70, 1, 0.05, 10);
+  private readonly handsAmbient = new THREE.HemisphereLight(0x5a4c3c, 0x140c08, 1.6);
+  private readonly handsKey = new THREE.DirectionalLight(0xffc890, 1.4);
   private readonly topLight = new THREE.AmbientLight(0xc8a890, 0);
   private readonly marker: THREE.Mesh;
   private readonly fx = new Particles();
@@ -177,6 +185,10 @@ export class GameRenderer {
   private readonly highlights = new Highlights();
   private readonly hands = new HandsView();
   private room: RoomMeshes | null = null;
+  private grid: GameState['room']['grid'] | null = null;
+  private torchAhead = TORCH_AHEAD;
+  private readonly tmpA = new THREE.Vector3();
+  private readonly tmpB = new THREE.Vector3();
   private roomLights: { light: THREE.PointLight; base: number; a: number; b: number }[] = [];
   private rig: CameraRig | null = null;
   private currentRoom: Room | null = null;
@@ -223,6 +235,10 @@ export class GameRenderer {
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     this.bokeh = new BokehPass(this.scene, this.camera, { focus: 6, aperture: 0.0012, maxblur: 0.005 });
     this.composer.addPass(this.bokeh);
+    const handsPass = new RenderPass(this.handsScene, this.handsCamera);
+    handsPass.clear = false;
+    handsPass.clearDepth = true;
+    this.composer.addPass(handsPass);
     this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), BLOOM.strength, BLOOM.radius, BLOOM.threshold);
     this.composer.addPass(this.bloom);
     this.composer.addPass(
@@ -251,13 +267,17 @@ export class GameRenderer {
       this.fx.group,
     );
     // The hero's torch: ahead and above, lighting what stands in front and throwing shadows back.
-    this.camera.add(this.torch, this.handFill, this.hands.group);
-    this.torch.position.set(0.2, 0.9, -2.2);
+    this.camera.add(this.torch);
+    this.handsCamera.add(this.hands.group, this.handsKey);
+    this.handsScene.add(this.handsCamera, this.handsAmbient);
+    this.handsKey.position.set(0.6, 1.5, 0.4);
+    this.handsKey.target.position.set(0, -0.4, -0.6);
+    this.handsCamera.add(this.handsKey.target);
+    this.torch.position.set(0.2, 0.9, -TORCH_AHEAD);
     this.torch.castShadow = true;
     this.torch.shadow.mapSize.set(256, 256);
     // Shadows are redrawn every other frame (see render): a cube shadow map renders the scene six times.
     this.torch.shadow.bias = -0.002;
-    this.handFill.position.set(-0.15, 0.15, -0.15);
 
     // Player marker, only visible from above.
     const markerGeo = new THREE.ConeGeometry(CELL * 0.28, CELL * 0.6, 3);
@@ -300,12 +320,15 @@ export class GameRenderer {
     );
     const look = roomLook(biomeOf(state).id);
     this.room = buildRoom(state.room.grid, look, seed);
+    this.grid = state.room.grid;
     this.scene.add(this.room.group);
     this.fog.color.setHex(look.fog);
     this.fogDensity = look.fogDensity;
     (this.scene.background as THREE.Color).setHex(look.fog);
     this.hemi.color.setHex(look.ambient);
     this.hemi.groundColor.setHex(look.ambientGround);
+    this.handsAmbient.color.setHex(look.ambient);
+    this.handsAmbient.groundColor.setHex(look.ambientGround);
     this.renderer.toneMappingExposure = look.exposure;
     // Tall rooms (the cathedral) are focused further away.
     (this.bokeh.uniforms as Record<string, THREE.IUniform>).focus!.value = look.height > 4 ? 7 : 5.5;
@@ -318,6 +341,30 @@ export class GameRenderer {
       for (let x = 0; x < g.w; x++)
         if (getCell(g, x, y) !== 'wall' && getCell(g, x, y) !== 'door') open.push(cellCenter({ x, y }));
     this.fx.setRoom(open, CELL, this.room.torches);
+  }
+
+  /**
+   * The hero's torch backs off from the wall ahead and dims as it nears it: a light pressed against
+   * stone blows it out to white. It never comes back over the hands, which would burn out instead.
+   */
+  private placeTorch(): void {
+    const g = this.grid;
+    if (!g) return;
+    const from = this.camera.getWorldPosition(this.tmpA);
+    const dir = this.camera.getWorldDirection(this.tmpB).setY(0);
+    if (dir.lengthSq() < 1e-6) return;
+    dir.normalize();
+    let free = TORCH_REACH;
+    for (let d = 0.1; d <= free; d += 0.1) {
+      const cell = getCell(g, Math.floor((from.x + dir.x * d) / CELL), Math.floor((from.z + dir.z * d) / CELL));
+      if (cell === 'wall' || cell === 'door' || cell === 'pillar') {
+        free = d;
+        break;
+      }
+    }
+    this.torchAhead += (torchAheadFor(free) - this.torchAhead) * 0.25;
+    this.torch.position.z = -this.torchAhead;
+    this.torch.intensity *= torchDimming(free - this.torchAhead);
   }
 
   /** Smooth (full resolution, smoothed edges and textures) or retro pixels (a low-resolution frame scaled up). */
@@ -443,6 +490,9 @@ export class GameRenderer {
     this.composer.setSize(this.cssW, this.cssH);
     this.camera.aspect = this.cssW / Math.max(1, this.cssH);
     this.camera.updateProjectionMatrix();
+    this.handsCamera.fov = this.camera.fov;
+    this.handsCamera.aspect = this.camera.aspect;
+    this.handsCamera.updateProjectionMatrix();
     // Re-fit the overhead view to the new aspect ratio, leaving room for the progress bar and door labels.
     if (this.rig && this.currentRoom) this.rig.setRoom(this.currentRoom, this.topMargins());
   }
@@ -755,6 +805,7 @@ export class GameRenderer {
 
     const s = now / 1000;
     this.torch.intensity = TORCH_INTENSITY * (0.94 + 0.06 * flicker(s, 9.1, 23.7));
+    this.placeTorch();
     for (const l of this.roomLights) l.light.intensity = l.base * flicker(s, l.a, l.b);
     if (++this.flickerFrame % 6 === 0) this.room.flicker();
     if (this.flickerFrame % 2 === 0) this.renderer.shadowMap.needsUpdate = true;
@@ -779,7 +830,13 @@ export class GameRenderer {
     this.highlights.draw(list, now);
 
     if (this.quality === 'high') this.composer.render();
-    else this.renderer.render(this.scene, this.camera);
+    else {
+      this.renderer.render(this.scene, this.camera);
+      this.renderer.autoClear = false;
+      this.renderer.clearDepth();
+      this.renderer.render(this.handsScene, this.handsCamera);
+      this.renderer.autoClear = true;
+    }
 
     return this.labels(now, cellLabels, top);
   }
