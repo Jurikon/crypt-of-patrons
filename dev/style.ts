@@ -7,15 +7,19 @@ import * as THREE from 'three';
  * with colonnades, stained glass and an altar, and three creatures of its own each.
  *
  *   ?biome=crypt|catacombs|cathedral   ?px=480 (render height)   ?still=1 (no sway, for screenshots)
+ *   ?style=mini — the same places as painted tabletop miniatures: a cut-away model on a table, figures on
+ *   bases, a lamp with shadows, tilt-shift blur.   ?view=top — look down at the model instead.
  */
 
 type Biome = 'crypt' | 'catacombs' | 'cathedral';
 const params = new URLSearchParams(location.search);
 let biome = (params.get('biome') as Biome | null) ?? 'crypt';
 const still = params.has('still');
+const mini = params.get('style') === 'mini';
+const top = params.get('view') === 'top';
 
 /** Internal render height: higher = finer pixels. */
-const LOW_H = Number(params.get('px') ?? 480);
+const LOW_H = Number(params.get('px') ?? (mini ? window.innerHeight : 480));
 /** Texture detail: texels per brick edge and so on. */
 const TEX = 2;
 
@@ -50,11 +54,12 @@ function pixelTexture(
   const g = c.getContext('2d')!;
   g.scale(TEX, TEX);
   draw(g, mulberry(seed));
-  grain(g, c.width, c.height, mulberry(seed + 99), 0.22);
+  // Miniatures are painted, not pixelled: soft filtering and only a hint of grain.
+  grain(g, c.width, c.height, mulberry(seed + 99), mini ? 0.1 : 0.22);
   const t = new THREE.CanvasTexture(c);
-  t.magFilter = THREE.NearestFilter;
-  t.minFilter = THREE.NearestFilter;
-  t.generateMipmaps = false;
+  t.magFilter = mini ? THREE.LinearFilter : THREE.NearestFilter;
+  t.minFilter = mini ? THREE.LinearMipmapLinearFilter : THREE.NearestFilter;
+  t.generateMipmaps = mini;
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
@@ -280,7 +285,10 @@ function flameTexture(seed: number, hot = '#fff3a0', mid = '#ffb030', cool = '#e
 
 const snapRes = new THREE.Vector2(320, 180);
 /** Lambert material whose vertices snap to a screen grid, like the PS1's integer rasteriser. */
-function mat(map: THREE.Texture, extra: THREE.MeshLambertMaterialParameters = {}) {
+function mat(map: THREE.Texture, extra: THREE.MeshLambertMaterialParameters = {}): THREE.Material {
+  // Miniatures: matte painted plastic under a lamp, no vertex wobble.
+  if (mini)
+    return new THREE.MeshStandardMaterial({ map, roughness: 0.78, metalness: 0, side: extra.side ?? THREE.FrontSide });
   const m = new THREE.MeshLambertMaterial({ map, ...extra });
   m.onBeforeCompile = (shader) => {
     shader.uniforms.uSnap = { value: snapRes };
@@ -306,10 +314,17 @@ const canvas = document.createElement('canvas');
 document.body.prepend(canvas);
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
 renderer.setPixelRatio(1);
+renderer.shadowMap.enabled = mini;
+renderer.shadowMap.type = THREE.PCFShadowMap;
+// The model has no ceiling: everything above this height is cut away.
+renderer.clippingPlanes = mini ? [new THREE.Plane(new THREE.Vector3(0, -1, 0), 2.7)] : [];
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(68, 16 / 9, 0.05, 80);
 scene.add(camera);
-const target = new THREE.WebGLRenderTarget(4, 4, { magFilter: THREE.NearestFilter, minFilter: THREE.NearestFilter });
+const target = new THREE.WebGLRenderTarget(4, 4, {
+  magFilter: mini ? THREE.LinearFilter : THREE.NearestFilter,
+  minFilter: mini ? THREE.LinearFilter : THREE.NearestFilter,
+});
 
 // Final pass: light dithering and 15-bit colour, as the PS1 did.
 const post = new THREE.Mesh(
@@ -328,6 +343,26 @@ const post = new THREE.Mesh(
         c = floor(c * 31.0 + bayer(px) * 0.7 + 0.5) / 31.0;
         gl_FragColor = vec4(c, 1.0);
       }`,
+    ...(mini
+      ? {
+          // Miniatures: tilt-shift (sharp band, blurred top and bottom), a vignette, a little more colour.
+          fragmentShader: `
+          uniform sampler2D tScene; uniform vec2 uRes; varying vec2 vUv;
+          void main(){
+            float d = abs(vUv.y - 0.46);
+            float blur = smoothstep(0.1, 0.5, d) * 5.0;
+            vec3 c = vec3(0.0);
+            for (int x = -2; x <= 2; x++) for (int y = -2; y <= 2; y++)
+              c += texture2D(tScene, vUv + vec2(float(x), float(y)) * blur / uRes).rgb;
+            c /= 25.0;
+            c = pow(c, vec3(1.0/2.2));
+            float l = dot(c, vec3(0.299, 0.587, 0.114));
+            c = mix(vec3(l), c, 1.2);
+            c *= mix(0.62, 1.0, smoothstep(0.95, 0.35, length(vUv - 0.5)));
+            gl_FragColor = vec4(c, 1.0);
+          }`,
+        }
+      : {}),
     depthTest: false,
   }),
 );
@@ -354,9 +389,10 @@ function box(w: number, h: number, d: number, m: THREE.Material | THREE.Material
   b.position.set(x, y, z);
   return b;
 }
-const add = (o: THREE.Object3D, x: number, y: number, z: number, ry = 0) => {
+const add = (o: THREE.Object3D, x: number, y: number, z: number, ry?: number) => {
   o.position.set(x, y, z);
-  o.rotation.y = ry;
+  // Only turn it when asked: a wall already turned to face the room keeps its turn.
+  if (ry !== undefined) o.rotation.y = ry;
   world.add(o);
   return o;
 };
@@ -426,7 +462,8 @@ function creature(
   ry: number,
 ) {
   const bar = healthBar(c.height + 0.35);
-  c.root.add(bar);
+  if (!mini) c.root.add(bar);
+  if (mini) c.root.add(miniBase(0x2a2a26, c.height < 1 ? 0.35 : 0.45));
   add(c.root, x, 0, z, ry);
   creatures.push({ root: c.root, arm: c.arm, phase: x + z, bar, idle: c.idle ?? (() => undefined) });
 }
@@ -1050,6 +1087,86 @@ hands.add(left);
 let yaw = 0;
 let pitch = 0;
 let swingStart = -1e9;
+/** A miniature's round base: dark, with a lighter painted rim and a little scenic grit on top. */
+function miniBase(color: number, r: number) {
+  const g = new THREE.Group();
+  const base = new THREE.Mesh(
+    new THREE.CylinderGeometry(r, r * 1.05, 0.08, 24),
+    new THREE.MeshStandardMaterial({ color, roughness: 0.6 }),
+  );
+  base.position.y = 0.04;
+  const rim = new THREE.Mesh(
+    new THREE.TorusGeometry(r * 1.02, 0.012, 4, 24),
+    new THREE.MeshStandardMaterial({ color: 0x6a5a40, roughness: 0.5 }),
+  );
+  rim.rotation.x = Math.PI / 2;
+  rim.position.y = 0.08;
+  g.add(base, rim);
+  return g;
+}
+
+/** The hero as a miniature: a knight in a blue tabard with sword and shield, on a gold-rimmed base. */
+function heroMini() {
+  const root = new THREE.Group();
+  const steel = mat(solid(0xa8aeb8, 181, 0x6a707a));
+  const blue = mat(solid(0x2a4a9a, 182, 0x1a2a6a));
+  const gold = mat(solid(0xd8a830, 183));
+  root.add(limb(0.85, 0.15, steel, -0.17, 0.85), limb(0.85, 0.15, steel, 0.17, 0.85));
+  root.add(box(0.56, 0.72, 0.32, steel, 0, 1.24), box(0.5, 0.9, 0.03, blue, 0, 1.05, 0.17));
+  root.add(box(0.34, 0.36, 0.34, [steel, steel, steel, steel, mat(face(0xa8aeb8, 'helm', 184)), steel], 0, 1.82));
+  const plume = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.35, 6), mat(solid(0xb02020, 185)));
+  plume.position.set(0, 2.15, -0.05);
+  root.add(plume);
+  const shield = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.05, 16), mat(solid(0xa02020, 186, 0xd8a830)));
+  shield.rotation.z = Math.PI / 2;
+  shield.position.set(-0.44, 1.25, 0.1);
+  root.add(shield);
+  root.add(
+    box(0.05, 1.0, 0.09, mat(solid(0xd8dce4, 187)), 0.42, 1.55, 0.25),
+    box(0.24, 0.05, 0.08, gold, 0.42, 1.1, 0.25),
+  );
+  const base = miniBase(0x1e2a1e, 0.45);
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(0.47, 0.02, 4, 24),
+    new THREE.MeshStandardMaterial({ color: 0xffd060, roughness: 0.3, metalness: 0.6 }),
+  );
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = 0.085;
+  root.add(base, ring);
+  return root;
+}
+
+/** The table the model stands on, and the lamp above it. */
+function tabletop(center: THREE.Vector3, size: number) {
+  const wood = mat(planks(0x6a4428, 191));
+  (wood as THREE.MeshStandardMaterial).map!.repeat.set(size / 3, size / 3);
+  const table = new THREE.Mesh(new THREE.PlaneGeometry(size * 3, size * 3).rotateX(-Math.PI / 2), wood);
+  table.position.set(center.x, -0.12, center.z);
+  table.receiveShadow = true;
+  world.add(table);
+  // The board's edge under the tiles.
+  const edge = new THREE.Mesh(
+    new THREE.BoxGeometry(size * 1.05, 0.12, size * 1.05),
+    new THREE.MeshStandardMaterial({ color: 0x2a1c12, roughness: 0.7 }),
+  );
+  edge.position.set(center.x, -0.06, center.z);
+  world.add(edge);
+  const lamp = new THREE.SpotLight(0xffe2b0, 220, 60, 0.75, 0.6, 1.2);
+  lamp.position.set(center.x - 4, 18, center.z + 6);
+  lamp.target.position.copy(center);
+  lamp.castShadow = true;
+  lamp.shadow.mapSize.set(2048, 2048);
+  lamp.shadow.bias = -0.0004;
+  world.add(lamp, lamp.target);
+  world.add(new THREE.HemisphereLight(0xfff0dc, 0x2a2018, 0.9));
+}
+
+const CENTERS: Record<Biome, { center: THREE.Vector3; size: number; cam: THREE.Vector3 }> = {
+  crypt: { center: new THREE.Vector3(0, 0, -4.5), size: 15, cam: new THREE.Vector3(0, 11, 6.5) },
+  catacombs: { center: new THREE.Vector3(0, 0, -6), size: 16, cam: new THREE.Vector3(-1, 12, 7) },
+  cathedral: { center: new THREE.Vector3(0, 0, -8), size: 24, cam: new THREE.Vector3(0, 15, 6) },
+};
+
 function build(b: Biome) {
   world.clear();
   lights.length = 0;
@@ -1058,6 +1175,31 @@ function build(b: Biome) {
   if (b === 'catacombs') buildCatacombs();
   else if (b === 'cathedral') buildCathedral();
   else buildCrypt();
+  if (mini) {
+    const c = CENTERS[b];
+    tabletop(c.center, c.size);
+    scene.fog = top ? null : new THREE.Fog(0x2a2018, 8, 40);
+    scene.background = new THREE.Color(0x1a120c);
+    // The hero stands where the camera is, as a figure on the board.
+    if (top) {
+      const hero = heroMini();
+      hero.position.set(camera.position.x, 0, camera.position.z - 1.5);
+      hero.rotation.y = Math.PI;
+      world.add(hero);
+      camera.position.copy(c.center).add(c.cam);
+      camera.lookAt(c.center);
+    }
+    // Anything that lives entirely above the cut (ceiling, ribs, beams) is simply not part of the model.
+    world.updateMatrixWorld(true);
+    const bounds = new THREE.Box3();
+    world.traverse((o) => {
+      if (!(o instanceof THREE.Mesh)) return;
+      o.castShadow = true;
+      o.receiveShadow = true;
+      if (bounds.setFromObject(o).min.y > 2.4) o.visible = false;
+    });
+    for (const l of lights) l.light.intensity *= 0.5;
+  }
   yaw = b === 'catacombs' ? -0.12 : 0;
   pitch = b === 'cathedral' ? 0.06 : -0.03;
 }
@@ -1108,7 +1250,8 @@ function loop(now: number) {
     c.bar.quaternion.copy(camera.quaternion);
     c.idle(t);
   }
-  camera.rotation.set(pitch + (still ? 0 : Math.sin(now / 900) * 0.01), yaw, 0, 'YXZ');
+  if (!(mini && top)) camera.rotation.set(pitch + (still ? 0 : Math.sin(now / 900) * 0.01), yaw, 0, 'YXZ');
+  hands.visible = !(mini && top);
   const s = (now - swingStart) / 320;
   const chop = s >= 0 && s < 1 ? Math.sin(s * Math.PI) : 0;
   right.rotation.x = 0.1 - chop * 1.3;
@@ -1121,3 +1264,6 @@ function loop(now: number) {
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
+
+// Console access while tuning the look.
+Object.assign(window, { __scene: scene, __camera: camera, __three: THREE });
