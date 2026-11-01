@@ -229,14 +229,24 @@ describe('boss: the crypt warden', () => {
     expect(r.events.filter((e) => e.type === 'pushed')).toHaveLength(1);
   });
 
-  it('killing the warden offers an item for the road, then the run is won', () => {
+  it('killing the warden offers an item for the road, then act 2 begins in the catacombs', () => {
     const boss = apply(createGame(4), { type: 'debug', playerId: 'p1', action: 'toBoss' }).state;
     const r = apply(boss, killAll);
     expect(r.state.run!.phase).toBe('reward');
     expect(r.state.run!.offer.every((o) => o.kind === 'item')).toBe(true);
     const r2 = apply(r.state, choose(0));
-    expect(r2.state.run!.phase).toBe('won');
+    expect(r2.state.run).toMatchObject({ act: 2, depth: 1, phase: 'combat' });
     expect(r2.state.players[0]!.items).toHaveLength(1);
-    expect(of(r2.events, 'runEnded')).toEqual([{ type: 'runEnded', result: 'won' }]);
+    expect(of(r2.events, 'actEntered')).toEqual([{ type: 'actEntered', act: 2 }]);
+    const catacombs = new Set(['drowned', 'bloated', 'leech', 'skeletonWarrior']);
+    expect(r2.state.enemies.every((e) => catacombs.has(e.type))).toBe(true);
+  });
+
+  it('the boss of act 3 ends the run in victory', () => {
+    const boss = apply(createGame(4), { type: 'debugJump', playerId: 'p1', act: 3, depth: ACT.rooms + 1 }).state;
+    expect(boss.enemies.map((e) => e.type)).toEqual(['fallenVoice']);
+    const r = apply(apply(boss, killAll).state, choose(0));
+    expect(r.state.run!.phase).toBe('won');
+    expect(of(r.events, 'runEnded')).toEqual([{ type: 'runEnded', result: 'won' }]);
   });
 });

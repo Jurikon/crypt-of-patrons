@@ -13,13 +13,14 @@ import {
   ITEMS,
   MODIFIERS,
 } from '../content';
-import { actAllies, advanceEnemies, intentCells } from './ai';
+import { actAllies, advanceEnemies, intentCells, nextAttack } from './ai';
 import { makeEnemy } from './encounter';
 import {
   addClass,
   chooseReward,
   doorAt,
   effectiveCooldown,
+  enterAct,
   enterDoor,
   enterRoom,
   roomCleared,
@@ -34,6 +35,7 @@ import {
   emit,
   emitTurn,
   gainRule,
+  addSurface,
   killUnit,
   moved,
   runEffects,
@@ -153,6 +155,16 @@ export function apply(prev: GameState, command: Command): ApplyResult {
       } else if (command.action === 'toBoss' && state.run) {
         enterRoom(state, ACT.rooms + 1, 'boss', null, events);
       }
+      break;
+    }
+    case 'debugJump': {
+      const run = state.run;
+      if (!run || command.act < 1 || command.act > ACT.acts || command.depth < 1 || command.depth > ACT.rooms + 1)
+        return reject('unknown_command');
+      if (command.act !== run.act) enterAct(state, command.act, events);
+      if (command.depth !== 1 || command.act === run.act)
+        enterRoom(state, command.depth, command.depth > ACT.rooms ? 'boss' : 'combat', null, events);
+      events.push({ type: 'debug', action: 'jump' });
       break;
     }
     case 'debugGrant': {
@@ -275,19 +287,34 @@ function worldTurn(eng: Engine): void {
     const e = state.enemies.find((x) => x.id === id);
     if (!e || !e.intent || !isActive(state)) continue;
     const intent = e.intent;
+    const attack = nextAttack(e);
     const { cells, hits } = intentCells(state, e, intent);
     events.push({ type: 'enemyAttack', unitId: e.id, intent, cells });
     e.intent = null;
     e.strikes++;
     // Blinded enemies strike at nothing.
-    if (e.statuses.some((st) => getStatus(st.id).blind) && intent.kind !== 'summon') {
+    if (e.statuses.some((st) => getStatus(st.id).blind) && intent.kind !== 'summon' && intent.kind !== 'aid') {
       events.push({ type: 'missed', unitId: e.id });
       continue;
     }
     if (intent.kind === 'summon') summonEnemies(eng, e, intent.unit, cells);
-    else
-      for (const hit of hits)
-        dealDamage(eng, hit, intent.damage, e, 'attack', intent.kind === 'line' ? ['projectile'] : ['melee']);
+    else if (intent.kind === 'aid') {
+      // Help lands on whichever enemy now stands on the chosen cell.
+      const cell = cells[0];
+      const friend = cell ? state.enemies.find((x) => same(x, cell)) : undefined;
+      if (friend && attack.kind === 'aid')
+        runEffects(eng, attack.effects, { source: e, target: cell!, dir: e.dir, tags: [], event: null });
+    } else {
+      const tags = intent.kind === 'line' ? (['projectile'] as const) : (['melee'] as const);
+      for (const hit of hits) {
+        const at = { x: hit.x, y: hit.y };
+        dealDamage(eng, hit, intent.damage, e, 'attack', tags);
+        if (attack.kind !== 'summon' && attack.kind !== 'aid' && attack.onHit && state.enemies.includes(e))
+          runEffects(eng, attack.onHit, { source: e, target: at, dir: e.dir, tags, event: null });
+      }
+      if (attack.kind !== 'summon' && attack.kind !== 'aid' && attack.surface && state.enemies.includes(e))
+        for (const c of cells) addSurface(eng, attack.surface.id, c, attack.surface.turns ?? null, 'foes');
+    }
     settle(eng);
   }
   if (!isActive(state)) return;

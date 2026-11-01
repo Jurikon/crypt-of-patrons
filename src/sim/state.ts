@@ -1,11 +1,11 @@
 import { createRng, fork, type Rng } from '../core/rng';
 import type { Dir, Vec2 } from '../core/grid';
-import { getClass, type RewardKind, type UpgradeKind } from '../content';
+import { BIOMES, getClass, type BiomeDef, type RewardKind, type UpgradeKind } from '../content';
 import { generateRoom, type Room } from './gen/room';
-import { placeCorpses, placeEncounter } from './encounter';
+import { placeCorpses, placeEncounter, placeFeatures } from './encounter';
 import { declareIntentsInPlace } from './ai';
 
-export const STATE_VERSION = 8;
+export const STATE_VERSION = 9;
 
 export interface Cooldown {
   readonly abilityId: string;
@@ -73,6 +73,12 @@ export type Intent =
   | { readonly kind: 'melee'; readonly dir: Dir; readonly damage: number }
   | { readonly kind: 'line'; readonly dir: Dir; readonly damage: number; readonly range: number }
   | { readonly kind: 'sweep'; readonly dir: Dir; readonly damage: number }
+  /** Every cell within `radius` of the enemy. */
+  | { readonly kind: 'burst'; readonly dir: Dir; readonly damage: number; readonly radius: number }
+  /** A square around where a hero stood when it was telegraphed. */
+  | { readonly kind: 'blast'; readonly dir: Dir; readonly damage: number; readonly cells: readonly Vec2[] }
+  /** Helps the enemy standing on the one cell (shield, healing). */
+  | { readonly kind: 'aid'; readonly dir: Dir; readonly damage: 0; readonly cells: readonly Vec2[] }
   /** New enemies will rise on these cells. */
   | {
       readonly kind: 'summon';
@@ -91,6 +97,8 @@ export interface Enemy extends UnitBase {
   elite: boolean;
   /** Strikes made so far; picks the next attack of a `pattern`. */
   strikes: number;
+  /** Boss phase reached (0 = none yet). */
+  phase: number;
 }
 
 export type Unit = Player | Ally | Enemy;
@@ -132,13 +140,16 @@ export type RunLogEntry =
   | { readonly type: 'room'; readonly depth: number; readonly kind: RoomKind }
   | { readonly type: 'reward'; readonly depth: number; readonly option: RewardOption | null }
   | { readonly type: 'cleared'; readonly depth: number; readonly turns: number }
-  | { readonly type: 'end'; readonly depth: number; readonly result: 'won' | 'lost' };
+  | { readonly type: 'end'; readonly depth: number; readonly result: 'won' | 'lost' }
+  | { readonly type: 'act'; readonly act: number };
 
 /**
  * The run (GDD 1): an act of rooms joined by doors. Everything comes from the run seed, so seed +
  * commands replays a whole run.
  */
 export interface RunState {
+  /** Act (biome), 1-based. */
+  act: number;
   /** Room number in the act, 1-based; ACT.rooms + 1 is the boss room. */
   depth: number;
   kind: RoomKind;
@@ -245,6 +256,7 @@ export function createGame(seed: number, opts: CreateGameOptions = {}): GameStat
     combat: { turn: 1, phase: 'player', status: 'active' },
     nextId: 1,
     run: {
+      act: 1,
       depth: 1,
       kind: 'combat',
       phase: 'combat',
@@ -268,31 +280,46 @@ export function createGame(seed: number, opts: CreateGameOptions = {}): GameStat
   return state;
 }
 
-/** RNG labels for a room; the first room keeps the labels it had before runs existed (same seeds, same rooms). */
-const label = (name: string, depth: number) => (depth === 1 ? name : `${name}:${depth}`);
+/**
+ * RNG labels for a room. Act 1 keeps the labels it had before acts existed, and its first room the ones
+ * from before runs existed (same seeds, same rooms).
+ */
+const label = (name: string, depth: number, act = 1) =>
+  act > 1 ? `${name}:a${act}:${depth}` : depth === 1 ? name : `${name}:${depth}`;
+
+/** The biome of an act (the crypt outside a run). */
+export function biomeOf(state: GameState): BiomeDef {
+  return BIOMES[(state.run?.act ?? 1) - 1] ?? (BIOMES[0] as BiomeDef);
+}
 
 /**
- * Fills the current room with its encounter and corpses (by depth and kind) and starts the fight.
- * Rest rooms are empty and start cleared.
+ * Fills the current room with its encounter, corpses and the biome's hazards (by depth and kind) and
+ * starts the fight. Rest rooms are empty and start cleared.
  */
 export function populateRoom(state: GameState, depth: number, kind: RoomKind, enemies = true): void {
   const root = createRng(state.seed);
+  const act = state.run?.act ?? 1;
   state.allies = [];
   state.enemies = [];
   state.surfaces = [];
   state.combat = { turn: 1, phase: 'player', status: 'active' };
   if (enemies && kind !== 'rest') {
-    state.enemies = placeEncounter(fork(root, label('encounter', depth)), state, depth, kind);
-    state.surfaces = placeCorpses(fork(root, label('corpses', depth)), state);
+    state.enemies = placeEncounter(fork(root, label('encounter', depth, act)), state, depth, kind);
+    state.surfaces = [
+      ...placeCorpses(fork(root, label('corpses', depth, act)), state),
+      ...placeFeatures(fork(root, label('features', depth, act)), state, biomeOf(state)),
+    ];
     declareIntentsInPlace(state);
   }
   if (state.enemies.length === 0) state.combat.status = 'won';
 }
 
-/** Generates the room for a depth: the boss room is the biggest square. */
-export function roomFor(seed: number, depth: number, kind: RoomKind): Room {
-  const rng = fork(createRng(seed), depth === 1 ? 'room:0' : `room:${depth}`);
-  return generateRoom(rng, kind === 'boss' ? { minSize: 11, maxSize: 11 } : {});
+/** Generates the room for a depth of an act, in its biome's style: the boss room is the biggest square. */
+export function roomFor(seed: number, depth: number, kind: RoomKind, act = 1): Room {
+  const rng = fork(createRng(seed), act > 1 ? `room:a${act}:${depth}` : depth === 1 ? 'room:0' : `room:${depth}`);
+  const layout = BIOMES[act - 1]?.layout;
+  const size = kind === 'boss' ? { minSize: 11, maxSize: 11 } : {};
+  return generateRoom(rng, layout ? { ...size, layout } : size);
 }
 
 export function findPlayer(state: GameState, id: string): Player | undefined {
@@ -312,7 +339,8 @@ export function isEnemy(state: GameState, unit: Unit): unit is Enemy {
 }
 
 export function sideOf(state: GameState, unit: Unit): Side {
-  return isEnemy(state, unit) ? 'foes' : 'heroes';
+  // Enemies carry an intent field, so one that just died (and left the list) is still a foe.
+  return isEnemy(state, unit) || 'intent' in unit ? 'foes' : 'heroes';
 }
 
 /** Living units in acting order: players, allies, enemies. */

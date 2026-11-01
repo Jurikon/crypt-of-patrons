@@ -217,7 +217,8 @@ function runAction(rng: Rng, state: GameState, strategy: Strategy, altars = fals
 export interface RunResult {
   readonly seed: number;
   readonly result: 'won' | 'lost' | 'stuck';
-  /** Room reached (ACT.rooms + 1 = the boss). */
+  /** Act and room reached (ACT.rooms + 1 = the boss). */
+  readonly act: number;
   readonly depth: number;
   readonly turns: number;
   /** What the hero ended up with. */
@@ -238,7 +239,7 @@ export function playRun(seed: number, classId: string, strategy: Strategy = 'gre
   // An impatient player: after 15 turns without anyone getting hurt, just go for the enemies.
   let calm = 0;
   let lastHp = -1;
-  for (let commands = 0; commands < 4000; commands++) {
+  for (let commands = 0; commands < 15000; commands++) {
     const run = state.run!;
     if (run.phase === 'won' || run.phase === 'lost') break;
     const hp = state.enemies.reduce((a, e) => a + e.hp, 0) + state.players[0]!.hp;
@@ -256,6 +257,7 @@ export function playRun(seed: number, classId: string, strategy: Strategy = 'gre
   return {
     seed,
     result,
+    act: run.act,
     depth: run.depth,
     turns: run.turns + state.combat.turn,
     build: {
@@ -320,10 +322,14 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       const won = runs.filter((r) => r.result === 'won').length;
       const stuck = runs.filter((r) => r.result === 'stuck').length;
       const depth = runs.reduce((a, r) => a + r.depth, 0) / runs.length;
+      const acts = [1, 2, 3].map(
+        (a) => runs.filter((r) => r.act >= a && !(r.act === a && r.result === 'lost' && r.depth <= 1)).length,
+      );
       const turns = runs.map((r) => r.turns).sort((a, b) => a - b);
       const gifts = runs.reduce((a, r) => a + r.build.gifts.length, 0) / runs.length;
       console.log(
         `run (careful${altars ? ', altars' : ''}) ${cls.id.padEnd(12)}: won ${won}/${runs.length}  stuck ${stuck}  ` +
+          `reached act 2/3 ${acts[1]}/${acts[2]}  ` +
           `avg room ${depth.toFixed(1)}  gifts ${gifts.toFixed(1)}  turns median ${turns[Math.floor(turns.length / 2)]}`,
       );
       if (altars)

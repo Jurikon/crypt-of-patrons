@@ -39,6 +39,17 @@ export interface Room {
 export interface RoomParams {
   readonly minSize?: number;
   readonly maxSize?: number;
+  /** A biome's own look (GDD 1): which shapes, how often each pillar style, how many pit groups. */
+  readonly layout?: RoomLayout;
+}
+
+export type PillarStyle = 'none' | 'scatter' | 'symmetric' | 'rows';
+
+export interface RoomLayout {
+  readonly shapes?: readonly RoomShape[];
+  readonly pillars?: Readonly<Record<PillarStyle, number>>;
+  /** Weights for 0, 1, 2 and 3 groups of pits. */
+  readonly pits?: readonly [number, number, number, number];
 }
 
 const OBSTACLE_ATTEMPTS = 24;
@@ -53,7 +64,7 @@ export function generateRoom(rng: Rng, params: RoomParams = {}): Room {
   const maxSize = params.maxSize ?? 11;
   const w = int(rng, minSize, maxSize);
   const h = int(rng, minSize, maxSize);
-  const shape = pick(rng, ROOM_SHAPES);
+  const shape = pick(rng, params.layout?.shapes ?? ROOM_SHAPES);
   const mask = shapeMask(rng, shape, w, h);
 
   const base = createGrid(w + 2, h + 2, 'wall');
@@ -77,8 +88,8 @@ export function generateRoom(rng: Rng, params: RoomParams = {}): Room {
   let grid = base;
   for (let attempt = 0; attempt < OBSTACLE_ATTEMPTS; attempt++) {
     const candidate = cloneGrid(base);
-    placePillars(rng, candidate, reserved);
-    placePits(rng, candidate, reserved);
+    placePillars(rng, candidate, reserved, params.layout?.pillars);
+    placePits(rng, candidate, reserved, params.layout?.pits);
     if (isConnected(candidate, spawn, (t) => t === 'floor')) {
       grid = candidate;
       break;
@@ -187,14 +198,14 @@ function placeDoors(rng: Rng, g: Grid): Door[] {
   return doors;
 }
 
-type PillarStyle = 'none' | 'scatter' | 'symmetric' | 'rows';
+const PILLARS: Readonly<Record<PillarStyle, number>> = { none: 1, scatter: 3, symmetric: 2, rows: 2 };
 
-function placePillars(rng: Rng, g: Grid, reserved: Set<number>): void {
+function placePillars(rng: Rng, g: Grid, reserved: Set<number>, weights = PILLARS): void {
   const style = weighted<PillarStyle>(rng, [
-    { item: 'none', weight: 1 },
-    { item: 'scatter', weight: 3 },
-    { item: 'symmetric', weight: 2 },
-    { item: 'rows', weight: 2 },
+    { item: 'none', weight: weights.none },
+    { item: 'scatter', weight: weights.scatter },
+    { item: 'symmetric', weight: weights.symmetric },
+    { item: 'rows', weight: weights.rows },
   ]);
   const canPlace = (x: number, y: number) => getCell(g, x, y) === 'floor' && !reserved.has(y * g.w + x);
   const noPillarAround = (x: number, y: number) => {
@@ -256,13 +267,16 @@ function placePillars(rng: Rng, g: Grid, reserved: Set<number>): void {
   }
 }
 
-function placePits(rng: Rng, g: Grid, reserved: Set<number>): void {
-  const groups = weighted(rng, [
-    { item: 0, weight: 2 },
-    { item: 1, weight: 4 },
-    { item: 2, weight: 3 },
-    { item: 3, weight: 1 },
-  ]);
+function placePits(
+  rng: Rng,
+  g: Grid,
+  reserved: Set<number>,
+  weights: readonly [number, number, number, number] = [2, 4, 3, 1],
+): void {
+  const groups = weighted(
+    rng,
+    weights.map((weight, item) => ({ item, weight })),
+  );
   const canPlace = (p: Vec2) => getCell(g, p.x, p.y) === 'floor' && !reserved.has(p.y * g.w + p.x);
   for (let gi = 0; gi < groups; gi++) {
     const size = int(rng, 1, 6);

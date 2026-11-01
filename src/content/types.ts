@@ -128,7 +128,20 @@ export type EffectSpec =
   | { readonly kind: 'shield'; readonly amount: number; readonly turns: number; readonly to?: UnitSelector }
   /** The owner's next action does not let the world answer. */
   | { readonly kind: 'freeAction' }
-  | { readonly kind: 'kill'; readonly to?: UnitSelector };
+  | { readonly kind: 'kill'; readonly to?: UnitSelector }
+  /** Drags units towards the acting unit, up to `distance` cells; stops short of anything in the way. */
+  | { readonly kind: 'pull'; readonly distance: number; readonly to?: UnitSelector }
+  /** Uses up the nearest `surface` within `radius` of the owner, then runs `effects` (a ghoul eats a corpse). */
+  | {
+      readonly kind: 'consume';
+      readonly surface: string;
+      readonly radius: number;
+      readonly effects: readonly EffectSpec[];
+    }
+  /** The owner turns to face whoever caused the event. */
+  | { readonly kind: 'faceActor' }
+  /** Spreads a surface over `count` free floor cells away from the heroes, picked by the seed. */
+  | { readonly kind: 'scatterSurface'; readonly surface: string; readonly count: number; readonly turns?: number };
 
 /** Where an ability can be aimed. */
 export type TargetSpec =
@@ -333,6 +346,12 @@ export interface SurfaceDef {
   readonly triggers: readonly TriggerDef[];
   /** Removed after its first trigger fires. */
   readonly singleUse?: boolean;
+  /** Damage with this tag to a unit standing here also hits every other unit on the same connected patch. */
+  readonly conducts?: Tag;
+  /** What happens when another surface lands on this one: both go, `result` (if any) takes the cell. */
+  readonly reactions?: readonly { readonly with: string; readonly result: string | null }[];
+  /** Enemies walk around it when they can. */
+  readonly hazard?: boolean;
 }
 
 /** A unit a player can call up (skeletons). Allies act right after the players. */
@@ -359,14 +378,38 @@ export interface ClassDef {
   readonly pool: readonly string[];
 }
 
+/** Extras any damaging enemy attack can have. */
+interface AttackExtras {
+  /** Run on every unit the attack hits (bleeding, stun, a hook that pulls). */
+  readonly onHit?: readonly EffectSpec[];
+  /** Left on every cell the attack covers (a flood of water, holy fire). */
+  readonly surface?: { readonly id: string; readonly turns?: number };
+}
+
 /** What an enemy telegraphs. Directions are relative to the enemy when it acts, so pushing it redirects the attack. */
 export type AttackSpec =
-  | { readonly kind: 'melee'; readonly damage: number }
-  | { readonly kind: 'line'; readonly damage: number; readonly range: number }
+  | ({ readonly kind: 'melee'; readonly damage: number } & AttackExtras)
+  | ({ readonly kind: 'line'; readonly damage: number; readonly range: number } & AttackExtras)
   /** The cell in front and the two beside it, everyone in them. */
-  | { readonly kind: 'sweep'; readonly damage: number }
+  | ({ readonly kind: 'sweep'; readonly damage: number } & AttackExtras)
+  /** Every cell within `radius` steps of the enemy (a cross for radius 1). */
+  | ({ readonly kind: 'burst'; readonly damage: number; readonly radius: number } & AttackExtras)
+  /** A square of side 2·radius+1 around where the nearest hero stands when it is telegraphed: step out of it. */
+  | ({ readonly kind: 'blast'; readonly damage: number; readonly radius: number } & AttackExtras)
   /** Calls up `count` units of an enemy type; the cells are chosen (and shown) when it is telegraphed. */
-  | { readonly kind: 'summon'; readonly unit: string; readonly count: number };
+  | { readonly kind: 'summon'; readonly unit: string; readonly count: number }
+  /** Helps the weakest other enemy within `range` (or itself): `effects` run on it. */
+  | { readonly kind: 'aid'; readonly range: number; readonly effects: readonly EffectSpec[] };
+
+/** A boss phase: from this much health down, a new pattern (and pace), with an entrance. */
+export interface PhaseDef {
+  readonly hpAtMost: number;
+  readonly pattern: readonly AttackSpec[];
+  readonly move?: number;
+  readonly behavior?: EnemyBehavior;
+  /** Run once when the phase begins (the floor cracks with holy fire). */
+  readonly onEnter?: readonly EffectSpec[];
+}
 
 export type EnemyBehavior =
   /** Walk next to the nearest target and strike. */
@@ -389,8 +432,37 @@ export interface EnemyDef {
   readonly behavior: EnemyBehavior;
   /** Which voxel model the renderer draws. */
   readonly model: string;
-  /** Relative spawn frequency in encounters. */
+  /** Relative spawn frequency in encounters (within its biomes). */
   readonly weight: number;
+  /** Rules the enemy carries, on the same events and filters as the heroes' (a ghoul eats corpses). */
+  readonly traits?: readonly TriggerDef[];
+  /** Run where it dies (a bloated corpse bursts). */
+  readonly onDeath?: readonly EffectSpec[];
+  /** Statuses that do not take hold of it. */
+  readonly immune?: readonly string[];
+  /** Blows from in front of it lose this much damage (a shield). */
+  readonly frontArmor?: number;
+  /** Comes in a group of this many. */
+  readonly pack?: number;
+  /** Boss phases, by falling health. */
+  readonly phases?: readonly PhaseDef[];
+}
+
+/** An act's place (GDD 1): who lives there, its boss, the hazards lying around. */
+export interface BiomeDef {
+  readonly id: string;
+  readonly nameKey: string;
+  /** Ordinary enemies and how often each shows up. */
+  readonly enemies: readonly { readonly id: string; readonly weight: number }[];
+  readonly boss: string;
+  /** Patches of surfaces in every fight: `patches` clusters of up to `size` cells each. */
+  readonly features: readonly { readonly surface: string; readonly patches: number; readonly size: number }[];
+  /** Room shapes and obstacles (the crypt keeps the generator's defaults). */
+  readonly layout?: {
+    readonly shapes?: readonly ('rect' | 'cross' | 'l' | 'chamfer')[];
+    readonly pillars?: Readonly<Record<'none' | 'scatter' | 'symmetric' | 'rows', number>>;
+    readonly pits?: readonly [number, number, number, number];
+  };
 }
 
 /** What a door offers (GDD 1): shown on the door, granted after clearing the room behind it. */

@@ -7,8 +7,18 @@ import { createRng, fork, nextU32 } from '../core/rng';
 import { getCell, type Vec2 } from '../core/grid';
 import { MODIFIERS, getModifier, getStatus } from '../content';
 import { t, type TextKey } from '../i18n';
-import { intentCells, type Enemy, type GameEvent, type GameState, type Intent, type Preview, type Room } from '../sim';
+import {
+  biomeOf,
+  intentCells,
+  type Enemy,
+  type GameEvent,
+  type GameState,
+  type Intent,
+  type Preview,
+  type Room,
+} from '../sim';
 import { CameraRig, cellCenter } from './cameraRig';
+import { lookOf } from './biomeLook';
 import { buildCaveMeshes, type CaveMeshes } from './caveMesh';
 import { CELL, WALL_H } from './dims';
 import { Particles } from './fx';
@@ -246,22 +256,30 @@ export class GameRenderer {
     this.roomLights = [];
 
     const depth = state.run?.depth ?? 1;
-    const caveSeed = nextU32(fork(createRng(state.seed), depth === 1 ? 'cave' : `cave:${depth}`));
+    const act = state.run?.act ?? 1;
+    const caveSeed = nextU32(
+      fork(createRng(state.seed), act > 1 ? `cave:a${act}:${depth}` : depth === 1 ? 'cave' : `cave:${depth}`),
+    );
     const cave = buildCave(state.room.grid, caveSeed);
-    this.room = buildCaveMeshes(cave);
+    const look = lookOf(biomeOf(state).id);
+    this.room = buildCaveMeshes(cave, look);
+    this.fog.color.setHex(look.fog);
+    (this.scene.background as THREE.Color).setHex(look.background);
+    this.hemi.color.setHex(look.hemiSky);
+    this.hemi.groundColor.setHex(look.hemiGround);
     this.scene.add(this.room.group);
 
     // One light per door (between its two braziers) and per lava pool.
     for (let i = 0; i + 1 < cave.braziers.length; i += 2) {
       const a = cave.braziers[i] as (typeof cave.braziers)[number];
       const b = cave.braziers[i + 1] as (typeof cave.braziers)[number];
-      const light = new THREE.PointLight(0xff8030, BRAZIER_INTENSITY, 12, 0.9);
+      const light = new THREE.PointLight(look.brazier, BRAZIER_INTENSITY, 12, 0.9);
       light.position.set((a.x + b.x) / 2, a.y + 0.1, (a.z + b.z) / 2);
       this.roomLights.push({ light, base: BRAZIER_INTENSITY, a: 9.1 + i, b: 23.7 - i });
     }
     for (const [i, pool] of cave.lavaPools.entries()) {
       const base = LAVA_LIGHT_INTENSITY + Math.min(4, pool.cells) * 0.6;
-      const light = new THREE.PointLight(0xff5a10, base, 9, 0.9);
+      const light = new THREE.PointLight(look.pool, base, 9, 0.9);
       light.position.set(pool.x, 0.5, pool.z);
       this.roomLights.push({ light, base, a: 3.1 + i * 0.4, b: 7.7 + i * 0.6 });
     }
@@ -282,7 +300,7 @@ export class GameRenderer {
   reset(state: GameState, now: number): void {
     const player = state.players[0];
     if (!player) return;
-    const key = `${state.seed}:${state.run?.depth ?? 0}`;
+    const key = `${state.seed}:${state.run?.act ?? 1}:${state.run?.depth ?? 0}`;
     if (key !== this.roomKey) {
       this.roomKey = key;
       this.buildRoom(state);
@@ -533,6 +551,14 @@ export class GameRenderer {
         v.spawn(e.unitId, e.summon, e.side === 'heroes', e.at, e.dir, e.hp, now);
         this.surfacesView.remove('corpse', e.at);
         return EVENT_MS.summoned ?? 0;
+      case 'resisted':
+        this.floater(e.unitId, t('status.resisted'), 'blocked', now);
+        return 0;
+      case 'phaseEntered': {
+        const u = v.units.get(e.unitId);
+        if (u) this.floater(e.unitId, '‼', 'damage', now);
+        return EVENT_MS.died ?? 0;
+      }
       case 'statusApplied':
       case 'statusExpired':
         v.setStatus(e.unitId, e.status, e.type === 'statusApplied');

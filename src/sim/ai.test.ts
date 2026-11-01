@@ -186,6 +186,6 @@ describe('encounters on 1000 seeds', () => {
       expect(cells.size).toBe(s.enemies.length);
       expect(s.combat.status).toBe('active');
     }
-    expect([...typesSeen].sort()).toEqual(['skeletonArcher', 'skeletonWarrior']);
+    expect([...typesSeen].sort()).toEqual(['ghoul', 'skeletonArcher', 'skeletonWarrior']);
   });
 });

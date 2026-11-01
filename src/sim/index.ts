@@ -2,6 +2,7 @@ export { apply, preview, replay, type ApplyResult, type Preview } from './apply'
 export { intentCells } from './ai';
 export type { Command, DebugAction, GameEvent, MoveDir, RejectReason, TurnDir } from './commands';
 export {
+  biomeOf,
   createGame,
   findPlayer,
   hasStatus,

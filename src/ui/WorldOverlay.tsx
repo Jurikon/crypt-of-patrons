@@ -28,6 +28,12 @@ function intentIcon(intent: Intent): string {
       return '⚔⚔⚔';
     case 'summon':
       return '☠+';
+    case 'burst':
+      return '✺';
+    case 'blast':
+      return '☄';
+    case 'aid':
+      return '✚';
   }
 }
 

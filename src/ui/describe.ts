@@ -112,6 +112,14 @@ export function describeEffect(e: EffectSpec): string {
       return t('effect.kill');
     case 'spreadStatuses':
       return withWho(t('effect.spreadStatuses'), e.to);
+    case 'pull':
+      return withWho(t('effect.pull', { n: e.distance }), e.to);
+    case 'consume':
+      return `${t('effect.consume', { surface: name(getSurface(e.surface).nameKey) })}: ${describeEffects(e.effects)}`;
+    case 'faceActor':
+      return t('effect.faceActor');
+    case 'scatterSurface':
+      return t('effect.scatterSurface', { surface: name(getSurface(e.surface).nameKey), n: e.count });
   }
 }
 

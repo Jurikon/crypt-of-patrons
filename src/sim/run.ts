@@ -32,11 +32,15 @@ import {
 } from './state';
 
 /**
- * The run around the fights (GDD 1): cleared room → reward (pick 1 of 3) → doors → next room, six rooms
- * and the boss. Pure and seeded like everything in sim: the same seed and commands replay a whole run.
+ * The run around the fights (GDD 1): cleared room → reward (pick 1 of 3) → doors → next room; in each of
+ * three acts ACT.rooms rooms and a boss. Pure and seeded like everything in sim: the same seed and
+ * commands replay a whole run.
  */
 
-const rngFor = (state: GameState, name: string) => fork(createRng(state.seed), `${name}:${state.run?.depth ?? 0}`);
+const rngFor = (state: GameState, name: string) => {
+  const act = state.run?.act ?? 1;
+  return fork(createRng(state.seed), `${name}:${act > 1 ? `a${act}:` : ''}${state.run?.depth ?? 0}`);
+};
 
 /** Abilities of every class the hero has (start kits and pools) not owned yet. */
 function newAbilities(p: Player): string[] {
@@ -201,14 +205,14 @@ export function roomCleared(state: GameState, events: GameEvent[]): void {
   run.turns += state.combat.turn;
   if (run.kind !== 'rest') run.log.push({ type: 'cleared', depth: run.depth, turns: state.combat.turn });
   if (run.kind === 'boss') {
-    // The warden falls: an item for the road ahead, then the act is won.
+    // The boss falls: an item for the road ahead, then the next act (or the run is won).
     run.offer = makeOffer(rngFor(state, 'reward'), p, 'boss').filter((o) => o.kind === 'item');
     if (run.offer.length > 0) {
       run.phase = 'reward';
       events.push({ type: 'rewardOffered', options: run.offer });
       return;
     }
-    winRun(state, events);
+    actDone(state, events);
     return;
   }
   if (run.pending) {
@@ -221,6 +225,31 @@ export function roomCleared(state: GameState, events: GameEvent[]): void {
     }
   }
   openDoors(state, events);
+}
+
+/** After a boss: on to the next act, or, after the last, the run is won. */
+function actDone(state: GameState, events: GameEvent[]): void {
+  const run = state.run;
+  if (!run) return;
+  if (run.act < ACT.acts) enterAct(state, run.act + 1, events);
+  else winRun(state, events);
+}
+
+/**
+ * Starts an act in its biome: per-act limits (elites, treasures, altars) start over, and the heroes walk
+ * into its first room.
+ */
+export function enterAct(state: GameState, act: number, events: GameEvent[]): void {
+  const run = state.run;
+  if (!run) return;
+  run.act = act;
+  run.elites = 0;
+  run.treasures = 0;
+  run.altars = 0;
+  for (const p of state.players) if (p.hp > 0) p.hp = Math.min(p.maxHp, p.hp + Math.ceil(p.maxHp * ACT.actHeal));
+  run.log.push({ type: 'act', act });
+  events.push({ type: 'actEntered', act });
+  enterRoom(state, 1, 'combat', null, events);
 }
 
 function winRun(state: GameState, events: GameEvent[]): void {
@@ -271,8 +300,9 @@ function openDoors(state: GameState, events: GameEvent[]): void {
       otherClasses(p).length > 0 &&
       run.depth >= ACT.initiationFrom &&
       (run.depth >= ACT.initiationBy || float(rng) < 0.5);
-    // The first altar is guaranteed in rooms 2–3 (so offered when leaving room 1 or 2).
-    const altarNow = run.forceAltar || (run.altars === 0 && run.depth <= 2 && (run.depth === 2 || float(rng) < 0.5));
+    // The run's first altar is guaranteed in rooms 2–3 of act 1 (so offered when leaving room 1 or 2).
+    const altarNow =
+      run.forceAltar || (run.act === 1 && run.altars === 0 && run.depth <= 2 && (run.depth === 2 || float(rng) < 0.5));
     run.forceAltar = false;
     let altarPlaced = false;
     for (const [n, x] of exits.entries()) {
@@ -336,7 +366,7 @@ export function chooseReward(eng: Engine, index: number | null, replace: number 
   run.log.push({ type: 'reward', depth: run.depth, option: option ?? null });
   run.offer = [];
   events.push({ type: 'rewardTaken', option: option ?? null });
-  if (run.kind === 'boss') winRun(state, events);
+  if (run.kind === 'boss') actDone(state, events);
   else openDoors(state, events);
   return null;
 }
@@ -388,7 +418,7 @@ export function enterRoom(
   run.phase = 'combat';
   if (kind === 'elite') run.elites++;
   run.log.push({ type: 'room', depth, kind });
-  state.room = roomFor(state.seed, depth, kind);
+  state.room = roomFor(state.seed, depth, kind, run.act);
   for (const p of state.players) {
     p.x = state.room.spawn.x;
     p.y = state.room.spawn.y;

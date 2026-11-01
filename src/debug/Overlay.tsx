@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks';
-import { ABILITIES, ABILITY_SLOTS, CLASSES, GIFTS, ITEMS, MODIFIERS, PATRONS } from '../content';
+import { ABILITIES, ABILITY_SLOTS, ACT, CLASSES, GIFTS, ITEMS, MODIFIERS, PATRONS } from '../content';
 import { abilityName, describeAbility, describeRule } from '../ui/describe';
 import { t, type TextKey } from '../i18n';
 import type { DebugAction } from '../sim';
@@ -18,6 +18,8 @@ export interface OverlayActions {
   toggleModifier(modifierId: string): void;
   toggleItem(itemId: string): void;
   toggleGift(giftId: string): void;
+  /** Go to a room of an act (ACT.rooms + 1 = its boss). */
+  jump(act: number, depth: number): void;
   addClass(classId: string): void;
   resetSave(): void;
 }
@@ -91,6 +93,24 @@ export function DebugOverlay({ view, actions }: { view: ViewState; actions: Over
           {t('debug.resetSave')}
         </button>
       </div>
+
+      <div class="debug-section">{t('debug.jump')}</div>
+      {Array.from({ length: ACT.acts }, (_, a) => (
+        <div key={a} class="debug-buttons debug-slots">
+          <span>{t('debug.act', { n: a + 1 })}</span>
+          {Array.from({ length: ACT.rooms + 1 }, (_, d) => (
+            <button
+              type="button"
+              key={d}
+              class={game.run?.act === a + 1 && game.run.depth === d + 1 ? 'active' : ''}
+              onClick={() => actions.jump(a + 1, d + 1)}
+              data-testid={`jump-${a + 1}-${d + 1}`}
+            >
+              {d === ACT.rooms ? '☠' : d + 1}
+            </button>
+          ))}
+        </div>
+      ))}
 
       <div class="debug-section">{t('debug.class')}</div>
       <div class="debug-buttons">

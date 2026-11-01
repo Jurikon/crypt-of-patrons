@@ -156,8 +156,10 @@ export function Hud({ view, actions, now }: { view: ViewState; actions: HudActio
 /** Act progress: the rooms behind you, the one you are in, and the boss at the end. */
 function RunProgress({ run }: { run: NonNullable<GameState['run']> }) {
   const rooms = Array.from({ length: ACT.rooms + 1 }, (_, i) => i + 1);
+  // Only this act's rooms: the log runs on across acts.
+  const start = run.log.map((e) => e.type).lastIndexOf('act') + 1;
   const kindOf = (depth: number) => {
-    for (const e of run.log) if (e.type === 'room' && e.depth === depth) return e.kind;
+    for (const e of run.log.slice(start)) if (e.type === 'room' && e.depth === depth) return e.kind;
     return null;
   };
   return (
@@ -173,6 +175,7 @@ function RunProgress({ run }: { run: NonNullable<GameState['run']> }) {
         );
       })}
       <span class="run-label">
+        {t('run.act', { n: run.act })} ·{' '}
         {run.depth > ACT.rooms ? t('run.boss') : t('run.room', { n: run.depth, total: ACT.rooms })}
       </span>
     </div>

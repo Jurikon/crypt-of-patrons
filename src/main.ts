@@ -118,6 +118,7 @@ const store = createStore<ViewState>({
   elapsedMs: 0,
   roomAt: -1e9,
   hybridNews: null,
+  actNews: null,
   patronVoice: null,
 });
 if (params.seed !== null) writeHash();
@@ -216,6 +217,8 @@ function run(command: Command, now: number): void {
   const formed = result.events.find((e) => e.type === 'hybridFormed');
   if (formed?.type === 'hybridFormed')
     store.set({ hybridNews: { name: t(getHybrid(formed.hybrid).nameKey as TextKey), at: now } });
+  const act = result.events.find((e) => e.type === 'actEntered');
+  if (act?.type === 'actEntered') store.set({ actNews: { act: act.act, at: now } });
   // Taking a gift: its patron (the altar's, for a duo gift) says a line.
   const taken = result.events.find((e) => e.type === 'rewardTaken');
   if (taken?.type === 'rewardTaken' && taken.option?.kind === 'gift') {
@@ -349,6 +352,7 @@ const actions: AppActions = {
   toggleModifier: (modifierId: string) => dispatch({ type: 'debugModifier', playerId: PLAYER_ID, modifierId }),
   toggleItem: (itemId: string) => dispatch({ type: 'debugItem', playerId: PLAYER_ID, itemId }),
   toggleGift: (giftId: string) => dispatch({ type: 'debugGift', playerId: PLAYER_ID, giftId }),
+  jump: (act: number, depth: number) => dispatch({ type: 'debugJump', playerId: PLAYER_ID, act, depth }),
   addClass: (id: string) => dispatch({ type: 'debugClass', playerId: PLAYER_ID, classId: id }),
   toggleQuality: () => {
     const quality: Quality = store.get().quality === 'high' ? 'low' : 'high';

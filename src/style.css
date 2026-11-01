@@ -1189,3 +1189,22 @@ kbd {
   color: var(--accent);
   font-size: 11px;
 }
+
+/* ---- Acts (M6) ---- */
+.act-news {
+  position: absolute;
+  left: 50%;
+  top: 26%;
+  transform: translate(-50%, -50%);
+  padding: 18px 40px;
+  font-size: 34px;
+  letter-spacing: 0.04em;
+  color: #fff;
+  text-align: center;
+  white-space: nowrap;
+  background: rgba(8, 6, 10, 0.82);
+  border-top: 2px solid var(--accent);
+  border-bottom: 2px solid var(--accent);
+  animation: hybrid-news 3.6s ease-out forwards;
+  pointer-events: none;
+}

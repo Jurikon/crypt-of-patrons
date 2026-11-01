@@ -22,6 +22,8 @@ export type Command =
   | { readonly type: 'debugItem'; readonly playerId: string; readonly itemId: string }
   /** Debug: give or take away a patron gift. */
   | { readonly type: 'debugGift'; readonly playerId: string; readonly giftId: string }
+  /** Debug: jump to a room of an act (depth ACT.rooms + 1 is the boss). */
+  | { readonly type: 'debugJump'; readonly playerId: string; readonly act: number; readonly depth: number }
   /** Debug: add a second class (as Initiation would). */
   | { readonly type: 'debugClass'; readonly playerId: string; readonly classId: string }
   /**
@@ -112,6 +114,12 @@ export type GameEvent =
     }
   | { readonly type: 'statusApplied'; readonly unitId: string; readonly status: string; readonly turns: number }
   | { readonly type: 'statusExpired'; readonly unitId: string; readonly status: string }
+  /** A status did not take hold (the unit is immune). */
+  | { readonly type: 'resisted'; readonly unitId: string; readonly status: string }
+  /** A boss enters a new phase (1-based). */
+  | { readonly type: 'phaseEntered'; readonly unitId: string; readonly phase: number }
+  /** A new act begins. */
+  | { readonly type: 'actEntered'; readonly act: number }
   | { readonly type: 'surfaceAdded'; readonly surface: string; readonly at: Vec2; readonly side: Side }
   | { readonly type: 'surfaceRemoved'; readonly surface: string; readonly at: Vec2 }
   /** A passive, modifier, status or surface reacted to something (for UI feedback). */
@@ -135,5 +143,8 @@ export type GameEvent =
   | { readonly type: 'hybridFormed'; readonly unitId: string; readonly hybrid: string }
   /** A blinded enemy's telegraphed attack went nowhere. */
   | { readonly type: 'missed'; readonly unitId: string }
-  | { readonly type: 'debug'; readonly action: DebugAction | 'grant' | 'modifier' | 'item' | 'class' | 'gift' }
+  | {
+      readonly type: 'debug';
+      readonly action: DebugAction | 'grant' | 'modifier' | 'item' | 'class' | 'gift' | 'jump';
+    }
   | { readonly type: 'rejected'; readonly reason: RejectReason };

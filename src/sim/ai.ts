@@ -1,5 +1,13 @@
 import { add, dirVec, getCell, index, rotateDir, DIRS, type Dir, type Vec2 } from '../core/grid';
-import { getAbility, getEnemy, getStatus, getSummon, type AttackSpec } from '../content';
+import {
+  getAbility,
+  getEnemy,
+  getStatus,
+  getSummon,
+  getSurface,
+  type AttackSpec,
+  type EnemyBehavior,
+} from '../content';
 import { dealDamage, moved, ownerPlayer, runEffects, settle, type Engine } from './engine';
 import { upgradedEffects } from './run';
 import { statOf } from './units';
@@ -12,7 +20,7 @@ import { surfaceAt, unitAt, unitById, type Ally, type Enemy, type GameState, typ
 
 const blocksSight = (t: string) => t === 'wall' || t === 'pillar' || t === 'door';
 
-/** An intent for an attack that needs no board knowledge (everything but summons). */
+/** An intent for an attack that needs no board knowledge (cells for summons, blasts and aid come later). */
 export function makeIntent(attack: AttackSpec, dir: Dir): Intent {
   switch (attack.kind) {
     case 'melee':
@@ -21,15 +29,50 @@ export function makeIntent(attack: AttackSpec, dir: Dir): Intent {
       return { kind: 'line', dir, damage: attack.damage, range: attack.range };
     case 'sweep':
       return { kind: 'sweep', dir, damage: attack.damage };
+    case 'burst':
+      return { kind: 'burst', dir, damage: attack.damage, radius: attack.radius };
+    case 'blast':
+      return { kind: 'blast', dir, damage: attack.damage, cells: [] };
     case 'summon':
       return { kind: 'summon', dir, damage: 0, unit: attack.unit, cells: [] };
+    case 'aid':
+      return { kind: 'aid', dir, damage: 0, cells: [] };
   }
 }
 
-/** The attack an enemy uses next: its pattern in turn, or its only attack. */
+/** The boss phase an enemy is in, if any. */
+const phaseOf = (e: Enemy) => (e.phase > 0 ? getEnemy(e.type).phases?.[e.phase - 1] : undefined);
+
+/** The attack an enemy uses next: its (phase's) pattern in turn, or its only attack. */
 export function nextAttack(e: Enemy): AttackSpec {
   const def = getEnemy(e.type);
-  return def.pattern?.[e.strikes % def.pattern.length] ?? def.attack;
+  const pattern = phaseOf(e)?.pattern ?? def.pattern;
+  return pattern?.[e.strikes % pattern.length] ?? def.attack;
+}
+
+const behaviorOf = (e: Enemy): EnemyBehavior => phaseOf(e)?.behavior ?? getEnemy(e.type).behavior;
+const moveOf = (e: Enemy): number => phaseOf(e)?.move ?? getEnemy(e.type).move;
+
+/** The square around the nearest hero, floor and pits only: where a blast will land. */
+function blastCells(state: GameState, e: Enemy, radius: number): Vec2[] {
+  const target = nearestPlayer(state, e);
+  if (!target) return [];
+  const cells: Vec2[] = [];
+  for (let dy = -radius; dy <= radius; dy++)
+    for (let dx = -radius; dx <= radius; dx++) {
+      const c = { x: target.x + dx, y: target.y + dy };
+      if (!blocksSight(getCell(state.room.grid, c.x, c.y))) cells.push(c);
+    }
+  return cells;
+}
+
+/** The enemy an aid goes to: the most hurt one within range (itself included), nearest on ties. */
+function aidCell(state: GameState, e: Enemy, range: number): Vec2 {
+  const hurt = (u: Enemy) => u.hp / u.maxHp;
+  const pick = state.enemies
+    .filter((u) => manhattan(u, e) <= range)
+    .sort((a, b) => hurt(a) - hurt(b) || manhattan(a, e) - manhattan(b, e) || (a === e ? 1 : b === e ? -1 : 0))[0];
+  return pick ? { x: pick.x, y: pick.y } : { x: e.x, y: e.y };
 }
 
 /**
@@ -55,6 +98,9 @@ export function intentFor(state: GameState, e: Enemy, dir: Dir): Intent {
   const attack = nextAttack(e);
   if (attack.kind === 'summon')
     return { kind: 'summon', dir, damage: 0, unit: attack.unit, cells: summonCells(state, e, attack.count) };
+  if (attack.kind === 'blast')
+    return { kind: 'blast', dir, damage: attack.damage, cells: blastCells(state, e, attack.radius) };
+  if (attack.kind === 'aid') return { kind: 'aid', dir, damage: 0, cells: [aidCell(state, e, attack.range)] };
   return makeIntent(attack, dir);
 }
 
@@ -83,7 +129,20 @@ export function intentCells(
       ];
       return result(cells.filter((c) => !blocksSight(getCell(state.room.grid, c.x, c.y))));
     }
+    case 'burst': {
+      const cells: Vec2[] = [];
+      for (let dy = -intent.radius; dy <= intent.radius; dy++)
+        for (let dx = -intent.radius; dx <= intent.radius; dx++) {
+          const c = { x: enemy.x + dx, y: enemy.y + dy };
+          if ((dx === 0 && dy === 0) || Math.abs(dx) + Math.abs(dy) > intent.radius) continue;
+          if (!blocksSight(getCell(state.room.grid, c.x, c.y))) cells.push(c);
+        }
+      return result(cells);
+    }
+    case 'blast':
+      return result([...intent.cells]);
     case 'summon':
+    case 'aid':
       return { cells: [...intent.cells], hit: undefined, hits: [] };
     case 'line': {
       const cells: Vec2[] = [];
@@ -146,8 +205,20 @@ interface Bfs {
   parent: number[];
 }
 
-/** Shortest paths over floor cells not occupied by other units. Pits, pillars and units block. */
-function bfs(state: GameState, start: Vec2): Bfs {
+/** A cell an enemy would rather not step on: a hazard laid by the other side (or by nobody). */
+const hazardFor = (state: GameState, c: Vec2) =>
+  state.surfaces.some((s) => s.x === c.x && s.y === c.y && s.side !== 'foes' && getSurface(s.id).hazard);
+
+/**
+ * Shortest paths over floor cells not occupied by other units. Pits, pillars and units block; enemies
+ * walk around hazards unless that leaves them nowhere to go.
+ */
+function bfs(state: GameState, start: Vec2, avoid = true): Bfs {
+  const b = search(state, start, avoid);
+  return avoid && b.dist.filter((d) => d > 0).length === 0 ? search(state, start, false) : b;
+}
+
+function search(state: GameState, start: Vec2, avoid: boolean): Bfs {
   const g = state.room.grid;
   const dist = new Array<number>(g.w * g.h).fill(-1);
   const parent = new Array<number>(g.w * g.h).fill(-1);
@@ -163,6 +234,7 @@ function bfs(state: GameState, start: Vec2): Bfs {
       const ni = index(g, n.x, n.y);
       if (dist[ni] !== -1) continue;
       if (unitAt(state, n.x, n.y)) continue;
+      if (avoid && hazardFor(state, n)) continue;
       dist[ni] = (dist[pi] as number) + 1;
       parent[ni] = pi;
       queue.push(n);
@@ -345,11 +417,24 @@ function dirFromStep(from: Vec2, to: Vec2): Dir {
 }
 
 function plan(state: GameState, e: Enemy): Plan {
-  const def = getEnemy(e.type);
+  const behavior = behaviorOf(e);
   const targets = targetsFor(state, e);
-  return def.behavior.kind === 'melee'
-    ? planMelee(state, e, def.move, targets)
-    : planRanged(state, e, e.moved ? 0 : def.move, def.behavior.minRange, def.behavior.maxRange, targets);
+  return behavior.kind === 'melee'
+    ? planMelee(state, e, moveOf(e), targets)
+    : planRanged(state, e, e.moved ? 0 : moveOf(e), behavior.minRange, behavior.maxRange, targets);
+}
+
+/** A boss whose health fell to the next phase's threshold enters it (once): new pattern, its entrance. */
+function checkPhase(eng: Engine, e: Enemy): void {
+  const phases = getEnemy(e.type).phases ?? [];
+  const next = phases[e.phase];
+  if (!next || e.hp > next.hpAtMost) return;
+  e.phase++;
+  e.strikes = 0;
+  eng.events.push({ type: 'phaseEntered', unitId: e.id, phase: e.phase });
+  if (next.onEnter)
+    runEffects(eng, next.onEnter, { source: e, target: { x: e.x, y: e.y }, dir: e.dir, tags: [], event: null });
+  settle(eng);
 }
 
 /** Walks a unit along a planned path, then turns it. Steps can set off traps, so triggers settle after each. */
@@ -418,6 +503,8 @@ export function advanceEnemies(eng: Engine): void {
   for (const id of state.enemies.map((e) => e.id)) {
     const e = state.enemies.find((x) => x.id === id);
     if (!e || livingPlayers(state).length === 0 || state.combat.status !== 'active') continue;
+    checkPhase(eng, e);
+    if (!state.enemies.includes(e) || state.combat.status !== 'active') continue;
     if (isStunned(e)) {
       e.moved = false;
       continue;
@@ -435,7 +522,7 @@ export function advanceEnemies(eng: Engine): void {
     e.moved = p.path.length > 0;
     // A ranged enemy either moves or aims in one turn, never both, and after a move it stands for a turn:
     // otherwise it kites forever at the player's own speed.
-    if (e.moved && getEnemy(e.type).behavior.kind === 'ranged') continue;
+    if (e.moved && behaviorOf(e).kind === 'ranged') continue;
     e.intent = intentFor(state, e, e.dir);
     events.push({ type: 'intentDeclared', unitId: e.id, intent: e.intent });
   }

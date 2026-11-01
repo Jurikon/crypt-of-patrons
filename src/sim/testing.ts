@@ -11,6 +11,8 @@ export interface MapOptions {
   readonly modifiers?: readonly string[];
   /** Ability ids to give the player after the class's own (slots 2, 3…). */
   readonly abilities?: readonly string[];
+  /** More enemy glyphs: letter → enemy type (for example `{ G: 'ghoul' }`). */
+  readonly enemies?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -49,8 +51,9 @@ export function stateFromMap(map: string, opts: MapOptions = {}): GameState {
         p.modifiers.push(...(opts.modifiers ?? []));
         players.push(p);
         cells.push('floor');
-      } else if (ch === 'W' || ch === 'A' || ch === 'B') {
-        const type = ch === 'W' ? 'skeletonWarrior' : ch === 'A' ? 'skeletonArcher' : 'cryptWarden';
+      } else if (ch === 'W' || ch === 'A' || ch === 'B' || opts.enemies?.[ch]) {
+        const type =
+          opts.enemies?.[ch] ?? (ch === 'W' ? 'skeletonWarrior' : ch === 'A' ? 'skeletonArcher' : 'cryptWarden');
         const def = getEnemy(type);
         enemies.push({
           id: `e${enemies.length + 1}`,
@@ -65,6 +68,7 @@ export function stateFromMap(map: string, opts: MapOptions = {}): GameState {
           moved: false,
           elite: false,
           strikes: 0,
+          phase: 0,
         });
         cells.push('floor');
       } else if (ch === 'S') {

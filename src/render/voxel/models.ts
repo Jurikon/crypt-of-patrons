@@ -44,6 +44,19 @@ const STRING = 14;
 const FEATHER = 15;
 const SOCKET = 16;
 const BRASS = 17;
+const FLESH = 18;
+const FLESH_DARK = 19;
+const WET = 20;
+const WEED = 21;
+const BLOAT = 22;
+const BLOAT_DARK = 23;
+const LEECH = 24;
+const LEECH_BELLY = 25;
+const ROBE = 26;
+const ROBE_SHADE = 27;
+const GOLD = 28;
+const CORAL = 29;
+const DEEP = 30;
 
 const PALETTE: readonly Rgb[] = [
   [0, 0, 0],
@@ -64,6 +77,19 @@ const PALETTE: readonly Rgb[] = [
   [0.78, 0.7, 0.56],
   [0.07, 0.02, 0.02],
   [0.78, 0.55, 0.18],
+  [0.42, 0.46, 0.34], // flesh: grey-green dead skin
+  [0.26, 0.3, 0.2],
+  [0.2, 0.3, 0.36], // wet rags
+  [0.14, 0.32, 0.18], // weed
+  [0.5, 0.52, 0.36], // bloated skin
+  [0.36, 0.24, 0.32],
+  [0.34, 0.08, 0.08], // leech
+  [0.6, 0.3, 0.22],
+  [0.86, 0.84, 0.78], // white robe
+  [0.6, 0.58, 0.54],
+  [0.95, 0.72, 0.22], // gold
+  [0.8, 0.36, 0.3], // coral
+  [0.08, 0.18, 0.24], // deep-water robe
 ];
 
 const boneAt = (x: number, y: number, z: number) => BONE[Math.floor(hash3(x + 40, y + 40, z + 40) * 3)] as number;
@@ -449,12 +475,281 @@ function decoy(): VoxelModel {
   };
 }
 
+/** A long robe from the waist down to the feet, widening, with a ragged hem. */
+function robe(s: Shape, c: number, shade: number, top = 22, ragged = 0.3): void {
+  for (let y = 0; y <= top; y++) {
+    const r = 4.2 + (top - y) / 7;
+    for (let a = 0; a < 56; a++) {
+      const t = (a / 56) * Math.PI * 2;
+      const x = Math.round(Math.sin(t) * r);
+      const z = Math.round(Math.cos(t) * (r * 0.75));
+      if (y < 3 && hash3(x, y, z + 3) < ragged) continue;
+      s.set(x, y, z, (x + y * 2) % 5 === 0 ? shade : c);
+    }
+  }
+}
+
+/** The Ghoul (act 1): a hunched corpse of grey-green flesh with long claws, always hungry. */
+function ghoul(): VoxelModel {
+  const { body, eyes } = skeleton(-1);
+  // Flesh stretched over ribs and belly, torn in places.
+  body.ellipsoid(0, 27, 0, 6, 6, 4, FLESH, 0.35);
+  for (let y = 22; y <= 32; y++) for (let x = -5; x <= 5; x++) if (hash3(x, y, 11) < 0.12) body.clear(x, y, 3);
+  body.ellipsoid(0, 41, 0, 5.3, 5.3, 5.3, FLESH_DARK, 0.2);
+  for (const ex of [-3, -2, 2, 3]) for (const ey of [39, 40]) for (const z of [4, 5]) body.clear(ex, ey, z);
+  for (let x = -3; x <= 3; x++) body.clear(x, 36, 5);
+  // Ragged loincloth.
+  for (let y = 14; y <= 21; y++) for (let x = -3; x <= 3; x++) if (hash3(x, y, 4) > 0.3) body.set(x, y, 4, CLOTH_DARK);
+  const arm = new Shape();
+  armBones(arm, 1);
+  for (const z of [-1, 1, 2]) arm.box(0, 0, -19, -24, z, z, BONE[2]);
+  return {
+    voxel: VOXEL,
+    palette: PALETTE,
+    body: body.voxels(),
+    arm: { pivot: [7, 32, 0], voxels: arm.voxels() },
+    eyes,
+    poses: { idle: -0.6, windup: -2.4, strike: -0.3 },
+  };
+}
+
+/** The Drowned (act 2): rags heavy with water, weed in its ribs, a rusted hook on a chain. */
+function drowned(): VoxelModel {
+  const { body, eyes } = skeleton(-1);
+  body.ellipsoid(0, 41.5, -0.6, 6.2, 6, 6.2, WET, 0.22);
+  for (let y = 33; y <= 42; y++) for (let x = -4; x <= 4; x++) for (let z = 3; z <= 6; z++) body.clear(x, y, z);
+  robe(body, WET, DEEP, 30, 0.45);
+  for (let y = 4; y <= 30; y += 3) body.set(Math.round(Math.sin(y) * 4), y, 4, WEED);
+  for (const [x, y] of [
+    [-2, 26],
+    [2, 28],
+    [0, 24],
+  ] as const)
+    body.box(x, x, y, y - 4, 3, 3, WEED);
+  const arm = new Shape();
+  armBones(arm, 1);
+  for (let y = -19; y >= -26; y--) arm.set(0, y, 0, y % 2 === 0 ? IRON : RUST);
+  arm.box(0, 0, -27, -28, 0, 3, RUST);
+  arm.box(0, 0, -25, -26, 3, 3, RUST);
+  return {
+    voxel: VOXEL,
+    palette: PALETTE,
+    body: body.voxels(),
+    arm: { pivot: [7, 32, 0], voxels: arm.voxels() },
+    eyes,
+    poses: { idle: -0.5, windup: -2.6, strike: -1.4 },
+  };
+}
+
+/** The Bloated corpse (act 2): a swollen belly on thin legs, ready to burst. */
+function bloated(): VoxelModel {
+  const s = new Shape();
+  for (const out of [-1, 1] as const) {
+    const x = out * 3;
+    s.box(x - out, x + out, 0, 1, -1, 3, FLESH_DARK);
+    s.box(x, x, 2, 12, 0, 1, FLESH);
+  }
+  s.ellipsoid(0, 22, 0, 9, 10, 8, BLOAT);
+  for (let y = 14; y <= 30; y++)
+    for (let x = -8; x <= 8; x++)
+      if (hash3(x, y, 13) < 0.08) s.set(x, y, Math.round(Math.sqrt(Math.max(0, 64 - x * x)) * 0.9), BLOAT_DARK);
+  s.ellipsoid(0, 34, 1, 3.6, 3.4, 3.6, FLESH);
+  const eyes: [number, number, number][] = [
+    [-1, 35, 4],
+    [1, 35, 4],
+  ];
+  for (const [x, y] of eyes) s.clear(x, y, 4);
+  const arm = new Shape();
+  arm.box(0, 0, -1, -9, 0, 1, FLESH);
+  arm.box(-1, 1, -10, -11, -1, 2, FLESH_DARK);
+  return {
+    voxel: VOXEL,
+    palette: PALETTE,
+    body: s.voxels(),
+    arm: { pivot: [9, 24, 0], voxels: arm.voxels() },
+    eyes,
+    poses: { idle: -0.3, windup: -1.8, strike: -0.6 },
+  };
+}
+
+/** A Leech (act 2): a fat red worm of rings, low to the ground, with a round mouth of teeth. */
+function leech(): VoxelModel {
+  const s = new Shape();
+  for (let i = 0; i < 6; i++) {
+    const z = -8 + i * 3;
+    const r = 2.6 + Math.sin((i / 5) * Math.PI) * 1.4;
+    s.ellipsoid(0, r, z, r, r, 1.9, i % 2 ? LEECH : LEECH_BELLY);
+  }
+  s.ellipsoid(0, 3, 9, 2.6, 2.6, 1.2, SOCKET);
+  const eyes: [number, number, number][] = [
+    [-2, 5, 8],
+    [2, 5, 8],
+  ];
+  const arm = new Shape();
+  for (const x of [-1, 0, 1]) arm.set(x, -1, 0, BONE[2]);
+  return {
+    voxel: VOXEL,
+    palette: PALETTE,
+    body: s.voxels(),
+    arm: { pivot: [0, 3, 10], voxels: arm.voxels() },
+    eyes,
+    poses: { idle: 0, windup: -0.6, strike: 0.4 },
+  };
+}
+
+/** The Templar (act 3): plate armour, a great helm, a white tabard with a gold cross, a tower shield. */
+function templar(): VoxelModel {
+  const { body, eyes } = skeleton(-1);
+  body.ellipsoid(0, 27, 0, 6.4, 7, 4.4, STEEL, 0.3);
+  body.box(-6, 6, 36, 46, -5, 5, STEEL);
+  body.box(-6, 6, 39, 39, 5, 5, IRON);
+  for (const ex of [-3, -2, 2, 3]) body.set(ex, 40, 5, SOCKET);
+  body.box(0, 0, 37, 45, 5, 5, GOLD);
+  for (const sx of [-1, 1]) body.ellipsoid(sx * 7.5, 33, 0.5, 3.2, 2.6, 3.6, STEEL, 0.45);
+  for (let y = 10; y <= 31; y++)
+    for (let x = -4; x <= 4; x++) {
+      body.set(x, y, 5, Math.abs(x) <= 0 || y === 24 || y === 25 ? GOLD : ROBE);
+      if (y < 22) body.set(x, y, -5, ROBE_SHADE);
+    }
+  for (const out of [-1, 1]) body.box(out * 2, out * 3, 1, 11, -1, 2, STEEL);
+  // Tower shield on the left arm.
+  for (let y = 8; y <= 34; y++)
+    for (let z = -6; z <= 8; z++) {
+      const rim = y === 8 || y === 34 || z === -6 || z === 8;
+      const cross = z === 1 || y === 26;
+      body.set(-9, y, z, rim ? GOLD : cross ? GOLD : ROBE);
+      body.set(-10, y, z, STEEL);
+    }
+  const arm = new Shape();
+  armBones(arm, 1);
+  arm.box(0, -1, -19, -19, -4, 5, GOLD);
+  for (let y = -20; y >= -38; y--) arm.box(0, -1, y, y, -1, 2, y <= -36 ? STEEL_EDGE : STEEL);
+  return {
+    voxel: 0.042,
+    palette: PALETTE,
+    body: body.voxels(),
+    arm: { pivot: [7, 32, 0], voxels: arm.voxels() },
+    eyes,
+    poses: { idle: -0.9, windup: -2.8, strike: -0.55 },
+  };
+}
+
+/** The Acolyte (act 3): a white-robed, hooded priest with a golden censer. */
+function acolyte(): VoxelModel {
+  const { body, eyes } = skeleton(1);
+  body.ellipsoid(0, 41.5, -0.6, 6.2, 6, 6.2, ROBE, 0.22);
+  for (let y = 33; y <= 42; y++) for (let x = -4; x <= 4; x++) for (let z = 3; z <= 6; z++) body.clear(x, y, z);
+  robe(body, ROBE, ROBE_SHADE, 33, 0.15);
+  body.box(-1, 1, 10, 31, 4, 4, GOLD);
+  const arm = new Shape();
+  armBones(arm, -1);
+  for (let y = -19; y >= -25; y--) arm.set(0, y, 0, GOLD);
+  arm.ellipsoid(0, -28, 0, 2.2, 2.2, 2.2, GOLD);
+  return {
+    voxel: VOXEL,
+    palette: PALETTE,
+    body: body.voxels(),
+    arm: { pivot: [-7, 32, 0], voxels: arm.voxels() },
+    eyes,
+    poses: { idle: -0.4, windup: -1.9, strike: -1.2 },
+  };
+}
+
+/** The Bellringer (act 3): a hunched monk swinging a great bronze bell. */
+function bellringer(): VoxelModel {
+  const { body, eyes } = skeleton(-1);
+  body.ellipsoid(0, 41.5, -0.6, 6.2, 6, 6.2, ROBE_SHADE, 0.22);
+  for (let y = 33; y <= 42; y++) for (let x = -4; x <= 4; x++) for (let z = 3; z <= 6; z++) body.clear(x, y, z);
+  robe(body, ROBE_SHADE, CLOTH_DARK, 32, 0.4);
+  body.ellipsoid(0, 31, -3, 6, 4, 4, ROBE_SHADE, 0.4);
+  const arm = new Shape();
+  armBones(arm, 1);
+  arm.box(0, 0, -19, -21, 0, 1, WOOD_DARK);
+  for (let y = -22; y >= -32; y--) {
+    const r = 2 + (y + 22) / -2.4;
+    for (let a = 0; a < 40; a++) {
+      const t = (a / 40) * Math.PI * 2;
+      arm.set(Math.round(Math.sin(t) * r), y, Math.round(Math.cos(t) * r), y === -32 ? GOLD : BRASS);
+    }
+  }
+  return {
+    voxel: VOXEL,
+    palette: PALETTE,
+    body: body.voxels(),
+    arm: { pivot: [7, 32, 0], voxels: arm.voxels() },
+    eyes,
+    poses: { idle: -0.3, windup: -2.6, strike: -0.9 },
+  };
+}
+
+/** The Drowned Mother (act 2 boss): a tall drowned queen, weed for hair, a coral crown, a trident. */
+function mother(): VoxelModel {
+  const { body, eyes } = skeleton(-1);
+  robe(body, DEEP, WET, 32, 0.5);
+  for (let y = 26; y <= 44; y++)
+    for (let x = -6; x <= 6; x++) if (hash3(x, y, 31) < 0.5) body.set(x, y, -5, y % 3 === 0 ? WEED : DEEP);
+  for (let a = 0; a < 40; a++) {
+    const t = (a / 40) * Math.PI * 2;
+    const x = Math.round(Math.sin(t) * 5.2);
+    const z = Math.round(Math.cos(t) * 5.2);
+    body.set(x, 45, z, CORAL);
+    if (a % 5 === 0) body.box(x, x, 46, 48 + (a % 3), z, z, CORAL);
+  }
+  const arm = new Shape();
+  armBones(arm, 1);
+  for (let y = -10; y >= -44; y--) arm.set(0, y, 0, y < -40 ? STEEL : WOOD_DARK);
+  for (const z of [-3, 0, 3]) arm.box(0, 0, -40, -46, z, z, STEEL_EDGE);
+  arm.box(0, 0, -40, -40, -3, 3, STEEL);
+  return {
+    voxel: 0.055,
+    palette: PALETTE,
+    body: body.voxels(),
+    arm: { pivot: [7, 32, 0], voxels: arm.voxels() },
+    eyes,
+    poses: { idle: -0.5, windup: -2.7, strike: -0.6 },
+  };
+}
+
+/** The Voice of the Fallen God (act 3 boss): a tall robed figure with a faceless gold mask and a halo. */
+function voice(): VoxelModel {
+  const { body, eyes } = skeleton(-1);
+  robe(body, ROBE, GOLD, 34, 0.1);
+  body.ellipsoid(0, 41, 0.5, 5.4, 5.6, 5.4, GOLD, 0.25);
+  for (const ex of [-2, 2]) body.set(ex, 40, 6, SOCKET);
+  for (let a = 0; a < 64; a++) {
+    const t = (a / 64) * Math.PI * 2;
+    body.set(Math.round(Math.sin(t) * 9), 44 + Math.round(Math.cos(t) * 9), -6, GOLD);
+  }
+  for (const sx of [-1, 1]) body.ellipsoid(sx * 7.5, 33, 0.5, 3.4, 2.8, 3.8, GOLD, 0.45);
+  const arm = new Shape();
+  armBones(arm, 1);
+  arm.box(0, -1, -19, -19, -4, 5, GOLD);
+  for (let y = -20; y >= -44; y--) arm.box(0, -1, y, y, -1, 2, y % 3 === 0 ? GOLD : STEEL_EDGE);
+  return {
+    voxel: 0.055,
+    palette: PALETTE,
+    body: body.voxels(),
+    arm: { pivot: [7, 32, 0], voxels: arm.voxels() },
+    eyes,
+    poses: { idle: -0.8, windup: -2.9, strike: -0.4 },
+  };
+}
+
 export const MODELS: Readonly<Record<string, VoxelModel>> = {
   warrior: warrior(),
   archer: archer(),
   warden: warden(),
   boneWall: boneWall(),
   decoy: decoy(),
+  ghoul: ghoul(),
+  drowned: drowned(),
+  bloated: bloated(),
+  leech: leech(),
+  templar: templar(),
+  acolyte: acolyte(),
+  bellringer: bellringer(),
+  mother: mother(),
+  voice: voice(),
 };
 
 /** Top of the model in world units, for placing labels. */

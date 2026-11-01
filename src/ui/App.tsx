@@ -1,5 +1,5 @@
 import { DebugOverlay, type OverlayActions } from '../debug/Overlay';
-import { getPatron } from '../content';
+import { BIOMES, getPatron } from '../content';
 import { t, type TextKey } from '../i18n';
 import { Hud, type HudActions } from './Hud';
 import { Minimap } from './Minimap';
@@ -33,6 +33,14 @@ export function App({ store, labels, actions }: { store: Store<ViewState>; label
       {view.hybridNews && now - view.hybridNews.at < 3200 && (
         <div key={view.hybridNews.at} class="hybrid-news" data-testid="hybrid-news">
           {t('hybrid.announce', { name: view.hybridNews.name })}
+        </div>
+      )}
+      {view.actNews && now - view.actNews.at < 3600 && (
+        <div key={view.actNews.at} class="act-news" data-testid="act-news">
+          {t('act.announce', {
+            n: view.actNews.act,
+            name: t((BIOMES[view.actNews.act - 1]?.nameKey ?? 'biome.crypt') as TextKey),
+          })}
         </div>
       )}
       {view.patronVoice && now - view.patronVoice.at < 3600 && (

@@ -3,6 +3,7 @@ import { VS } from './dims';
 import { toonMaterial } from './toon';
 import { J_MIN, type Cave } from './voxel/cave';
 import { greedyMesh, type MeshData } from './voxel/mesher';
+import { lookOf, type BiomeLook } from './biomeLook';
 import { colorOf, isCeiling, isLava, isRockLike, LAVA_CRACK } from './voxel/palette';
 
 /** Converts mesher output (voxel units) to a world-space geometry with per-vertex colours. */
@@ -51,6 +52,8 @@ const LAVA_FRAGMENT = /* glsl */ `
   uniform float uTime;
   uniform float uVoxel;
   uniform float uGlow;
+  uniform vec3 uGlowBase;
+  uniform vec3 uGlowWave;
   varying vec3 vWorld;
   varying vec3 vNormal;
   varying float vKind;
@@ -68,7 +71,7 @@ const LAVA_FRAGMENT = /* glsl */ `
       k = 0.5 + 0.25 * sin(uTime * 0.9 + cell.x * 0.35 + cell.z * 0.2) + 0.25 * sin(uTime * 1.5 + ph);
     }
     // Red above 1 makes lava bloom while the clamped on-screen colour stays orange, not yellow.
-    vec3 c = vec3(1.6, 0.33 + k * 0.45, 0.04 + k * k * 0.1) * uGlow * (vKind > 0.5 ? 0.9 : 1.0);
+    vec3 c = (uGlowBase + uGlowWave * vec3(k, k, k * k)) * uGlow * (vKind > 0.5 ? 0.9 : 1.0);
     gl_FragColor = vec4(c, 1.0);
     #include <fog_fragment>
     #include <colorspace_fragment>
@@ -83,7 +86,7 @@ export interface CaveMeshes {
   dispose(): void;
 }
 
-export function buildCaveMeshes(cave: Cave): CaveMeshes {
+export function buildCaveMeshes(cave: Cave, look: BiomeLook = lookOf('crypt')): CaveMeshes {
   const vol = cave.volume;
   const offset = new THREE.Vector3(0, J_MIN * VS, 0);
   const rockOcc = (v: number) => isRockLike(v) || isLava(v);
@@ -95,15 +98,22 @@ export function buildCaveMeshes(cave: Cave): CaveMeshes {
   const lavaMaterial = new THREE.ShaderMaterial({
     uniforms: THREE.UniformsUtils.merge([
       THREE.UniformsLib.fog,
-      { uTime: { value: 0 }, uVoxel: { value: VS }, uGlow: { value: 1 } },
+      {
+        uTime: { value: 0 },
+        uVoxel: { value: VS },
+        uGlow: { value: 1 },
+        uGlowBase: { value: new THREE.Vector3(...look.glowBase) },
+        uGlowWave: { value: new THREE.Vector3(...look.glowWave) },
+      },
     ]),
     vertexShader: LAVA_VERTEX,
     fragmentShader: LAVA_FRAGMENT,
     fog: true,
   });
 
-  const rockMesh = new THREE.Mesh(toGeometry(rock, VS, offset, colorOf), rockMat);
-  const ceiling = new THREE.Mesh(toGeometry(ceil, VS, offset, colorOf), rockMat);
+  const stone = (v: number) => look.stone(colorOf(v));
+  const rockMesh = new THREE.Mesh(toGeometry(rock, VS, offset, stone), rockMat);
+  const ceiling = new THREE.Mesh(toGeometry(ceil, VS, offset, stone), rockMat);
   const lavaMesh = new THREE.Mesh(
     toGeometry(lava, VS, offset, (v) => (v === LAVA_CRACK ? [1, 0, 0] : [0, 0, 0])),
     lavaMaterial,

@@ -15,6 +15,8 @@ const FLAT: Record<string, { color: number; opacity: number; glow?: boolean; vol
   blood: { color: 0x5a0606, opacity: 0.75 },
   smoke: { color: 0x9a9088, opacity: 0.55, volume: 2.1 },
   poisonCloud: { color: 0x6ad040, opacity: 0.32, volume: 1.4 },
+  water: { color: 0x14506e, opacity: 0.8 },
+  holyFire: { color: 0xfff0b0, opacity: 0.9, glow: true },
 };
 const outline = new THREE.MeshBasicMaterial({ color: 0x2a0a08, side: THREE.BackSide });
 const glow = new THREE.MeshBasicMaterial({ vertexColors: true });

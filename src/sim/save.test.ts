@@ -39,7 +39,7 @@ describe('saves', () => {
 
   it('migrates a version-6 save (before second classes and items)', () => {
     const v7 = createGame(4, { classId: 'rogue' });
-    const { initiation: _i, treasures: _t, patron: _p, altars: _a, forceAltar: _f, ...run } = v7.run!;
+    const { initiation: _i, treasures: _t, patron: _p, altars: _a, forceAltar: _f, act: _act, ...run } = v7.run!;
     const v6 = {
       ...v7,
       version: 6,
@@ -49,17 +49,27 @@ describe('saves', () => {
       ),
     };
     const migrated = migrateState(JSON.parse(JSON.stringify(v6)))!;
-    expect(migrated.version).toBe(8);
+    expect(migrated.version).toBe(9);
     expect(migrated.players[0]).toMatchObject({ classes: ['rogue'], hybrid: null, items: [], ruleUses: [] });
     expect(migrated.run).toMatchObject({ initiation: false, treasures: 0 });
   });
 
+  it('migrates a version-8 save (before acts)', () => {
+    const v9 = createGame(5, { classId: 'knight' });
+    const { act: _a, ...run } = v9.run!;
+    const v8 = { ...v9, version: 8, run, enemies: v9.enemies.map(({ phase: _p, ...e }) => e) };
+    const migrated = migrateState(JSON.parse(JSON.stringify(v8)))!;
+    expect(migrated.version).toBe(9);
+    expect(migrated.run).toMatchObject({ act: 1 });
+    expect(migrated.enemies.every((e) => e.phase === 0)).toBe(true);
+  });
+
   it('migrates a version-7 save (before patrons)', () => {
-    const v8 = createGame(5, { classId: 'knight' });
-    const { patron: _p, altars: _a, forceAltar: _f, ...run } = v8.run!;
-    const v7 = { ...v8, version: 7, run, players: v8.players.map(({ gifts: _g, turnUses: _tu, ...p }) => p) };
+    const v9 = createGame(5, { classId: 'knight' });
+    const { patron: _p, altars: _a, forceAltar: _f, act: _act, ...run } = v9.run!;
+    const v7 = { ...v9, version: 7, run, players: v9.players.map(({ gifts: _g, turnUses: _tu, ...p }) => p) };
     const migrated = migrateState(JSON.parse(JSON.stringify(v7)))!;
-    expect(migrated.version).toBe(8);
+    expect(migrated.version).toBe(9);
     expect(migrated.players[0]).toMatchObject({ gifts: [], turnUses: [] });
     expect(migrated.run).toMatchObject({ patron: null, altars: 0, forceAltar: false });
   });

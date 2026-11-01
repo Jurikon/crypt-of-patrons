@@ -1,4 +1,5 @@
-import { add, dirVec, getCell, type CellType, type Dir, type Vec2 } from '../core/grid';
+import { add, dirVec, getCell, DIRS, type CellType, type Dir, type Vec2 } from '../core/grid';
+import { shuffle } from '../core/rng';
 import {
   getEnemy,
   getStatus,
@@ -208,6 +209,9 @@ export function dealDamage(
     dmg *= 1 + statOf(state, source, 'backstab');
   }
   if (attack && dmg > 0) dmg = Math.floor(dmg * (1 + statOf(state, source, 'damageFactor')));
+  // A shield in front: blows from the front lose some damage.
+  if (attack && dmg > 0 && isEnemy(state, unit) && fromFront(source, unit))
+    dmg = Math.max(0, dmg - (getEnemy(unit.type).frontArmor ?? 0));
   // A raised guard stops projectiles coming from the front.
   if (source && tags.includes('projectile') && hasFlag(unit, 'frontGuard') && fromFront(source, unit)) dmg = 0;
   if (isPlayer(state, unit) && unit.god) dmg = 0;
@@ -225,7 +229,52 @@ export function dealDamage(
   events.push({ type: 'damaged', unitId: unit.id, amount: dmg, absorbed, hp: unit.hp, cause, backstab: shownBackstab });
   emit(eng, 'damaged', { actor: source, subject: unit, tags });
   if (source && cause === 'attack') emit(eng, 'hit', { actor: source, subject: unit, tags, backstab });
+  const at = pos(unit);
   if (unit.hp <= 0) killUnit(eng, unit, source, tags);
+  conduct(eng, at, unit, amount, source, cause, tags);
+}
+
+let conducting = false;
+
+/**
+ * Water and the like carry some damage (lightning) to everyone else standing on the same connected patch.
+ * The carried blows do not carry on again.
+ */
+function conduct(
+  eng: Engine,
+  at: Vec2,
+  unit: Unit,
+  amount: number,
+  source: Unit | null,
+  cause: 'attack' | 'collision' | 'effect',
+  tags: readonly Tag[],
+): void {
+  if (conducting) return;
+  const { state, events } = eng;
+  const sf = state.surfaces.find((s) => same(s, at) && getSurface(s.id).conducts);
+  const tag = sf ? getSurface(sf.id).conducts : undefined;
+  if (!sf || !tag || !tags.includes(tag)) return;
+  const cells = patch(state, at, sf.id);
+  const others = allUnits(state).filter((u) => u !== unit && cells.some((c) => same(c, u)));
+  if (others.length === 0) return;
+  events.push({ type: 'area', center: at, cells });
+  conducting = true;
+  try {
+    for (const u of others) dealDamage(eng, u, amount, source, cause, tags);
+  } finally {
+    conducting = false;
+  }
+}
+
+/** The cells of one connected patch of a surface (four-way neighbours). */
+function patch(state: GameState, start: Vec2, id: string): Vec2[] {
+  const out: Vec2[] = [start];
+  for (let i = 0; i < out.length; i++)
+    for (const d of DIRS) {
+      const n = add(out[i] as Vec2, dirVec(d));
+      if (!out.some((c) => same(c, n)) && surfaceAt(state, n, id)) out.push(n);
+    }
+  return out;
 }
 
 /** Removes a unit from play (enemies and allies leave their arrays; players stay with hp 0). */
@@ -238,6 +287,7 @@ export function killUnit(eng: Engine, unit: Unit, killer: Unit | null, tags: rea
   const cell = pos(unit);
   const side = sideOf(state, unit);
   const carried = unit.statuses.filter((s) => getStatus(s.id).jumps);
+  const onDeath = isEnemy(state, unit) ? getEnemy(unit.type).onDeath : undefined;
   unit.hp = 0;
   events.push({ type: 'died', unitId: unit.id });
   if (isEnemy(state, unit)) state.enemies.splice(state.enemies.indexOf(unit), 1);
@@ -262,6 +312,8 @@ export function killUnit(eng: Engine, unit: Unit, killer: Unit | null, tags: rea
   };
   if (killer && killer !== unit) eng.queue.push({ ...base, on: 'kill', actor: refOf(state, killer) });
   eng.queue.push({ ...base, on: 'death', actor: killer ? refOf(state, killer) : null });
+  // What it leaves behind (a burst of poison), acting as itself even though it is gone.
+  if (onDeath) runEffects(eng, onDeath, { source: unit, target: cell, dir: unit.dir, tags: [], event: null });
   checkCombatEnd(state, events);
 }
 
@@ -321,6 +373,33 @@ export function push(
   }
 }
 
+/**
+ * Drags `unit` towards `to`, a cell at a time: stops short of walls, units and the puller itself, and
+ * falls into a pit it is dragged over. No collision damage: a hook, not a shove.
+ */
+export function pull(eng: Engine, unit: Unit, to: Unit, distance: number, tags: readonly Tag[]): void {
+  const { state, events } = eng;
+  if (unit === to) return;
+  const dir = dirTowards(pos(unit), pos(to));
+  const step = dirVec(dir);
+  for (let i = 0; i < distance; i++) {
+    if (!isAlive(state, unit)) return;
+    const from = pos(unit);
+    const next = add(from, step);
+    const cell = getCell(state.room.grid, next.x, next.y);
+    if (blocksPush(cell) || unitAt(state, next.x, next.y)) return;
+    unit.x = next.x;
+    unit.y = next.y;
+    events.push({ type: 'pushed', unitId: unit.id, from, to: next });
+    emit(eng, 'enterCell', { actor: to, subject: unit, tags });
+    if (cell === 'pit') {
+      events.push({ type: 'fell', unitId: unit.id, at: next });
+      killUnit(eng, unit, to, tags);
+      return;
+    }
+  }
+}
+
 /** A unit's own movement (a step, a dash, a teleport): queues `moved` and `enterCell`. */
 export function moved(eng: Engine, unit: Unit, from: Vec2, actor: Unit, tags: readonly Tag[]): void {
   emit(eng, 'moved', { actor, subject: unit, from, tags });
@@ -331,6 +410,10 @@ export function applyStatus(eng: Engine, unit: Unit, id: string, turns: number, 
   const { state, events } = eng;
   if (!isAlive(state, unit)) return;
   const def = getStatus(id);
+  if (isEnemy(state, unit) && getEnemy(unit.type).immune?.includes(id)) {
+    events.push({ type: 'resisted', unitId: unit.id, status: id });
+    return;
+  }
   const old = unit.statuses.find((s) => s.id === id);
   const inst = {
     id,
@@ -357,6 +440,15 @@ export function removeStatus(eng: Engine, unit: Unit, id: string): void {
 export function addSurface(eng: Engine, id: string, cell: Vec2, turns: number | null, side: Side): void {
   const { state, events } = eng;
   if (getCell(state.room.grid, cell.x, cell.y) !== 'floor') return;
+  // Surfaces react: fire on ice leaves water, fire on water goes out.
+  for (const old of state.surfaces.filter((s) => same(s, cell) && s.id !== id)) {
+    const reaction = getSurface(old.id).reactions?.find((x) => x.with === id);
+    if (!reaction) continue;
+    removeSurface(eng, old.id, cell);
+    if (reaction.result)
+      addSurface(eng, reaction.result, cell, reaction.result === old.id ? old.turns : turns, old.side);
+    return;
+  }
   state.surfaces = state.surfaces.filter((s) => !(s.id === id && same(s, cell)));
   state.surfaces.push({ id, x: cell.x, y: cell.y, turns, side });
   events.push({ type: 'surfaceAdded', surface: id, at: { x: cell.x, y: cell.y }, side });
@@ -689,6 +781,43 @@ export function runEffects(eng: Engine, effects: readonly EffectSpec[], context:
       case 'kill':
         for (const u of selectUnits(eng, effect.to, ctx)) killUnit(eng, u, ctx.source, ctx.tags);
         break;
+      case 'pull':
+        for (const u of selectUnits(eng, effect.to, ctx)) pull(eng, u, ctx.source, effect.distance, ctx.tags);
+        break;
+      case 'consume': {
+        const me = pos(ctx.source);
+        const food = state.surfaces
+          .filter((s) => s.id === effect.surface && manhattan(s, me) <= effect.radius)
+          .sort((a, b) => manhattan(a, me) - manhattan(b, me) || a.y - b.y || a.x - b.x)[0];
+        if (!food) break;
+        removeSurface(eng, food.id, food);
+        runEffects(eng, effect.effects, { ...ctx, target: me, targetId: ctx.source.id });
+        break;
+      }
+      case 'faceActor': {
+        const at = ctx.event?.actorCell;
+        if (!at || same(at, pos(ctx.source))) break;
+        const to = dirTowards(pos(ctx.source), at);
+        if (to !== ctx.source.dir) {
+          events.push({ type: 'turned', unitId: ctx.source.id, from: ctx.source.dir, to });
+          ctx.source.dir = to;
+        }
+        break;
+      }
+      case 'scatterSurface': {
+        const g = state.room.grid;
+        const free: Vec2[] = [];
+        for (let y = 0; y < g.h; y++)
+          for (let x = 0; x < g.w; x++) {
+            const c = { x, y };
+            if (getCell(g, x, y) !== 'floor' || unitAt(state, x, y)) continue;
+            if (state.players.some((p) => p.hp > 0 && manhattan(p, c) <= 1)) continue;
+            free.push(c);
+          }
+        for (const c of shuffle(state.rng, free).slice(0, effect.count))
+          addSurface(eng, effect.surface, c, effect.turns ?? null, sideOf(state, ctx.source));
+        break;
+      }
       default: {
         const _exhaustive: never = effect;
       }
@@ -791,6 +920,12 @@ function listeners(state: GameState, ev: TriggerEvent): Listener[] {
         if (t.oncePerTurn && p.turnUses.includes(r.id)) continue;
         out.push({ owner: p, trigger: t, rule: r.id, surface: null, once: t.oncePerRoom === true });
       }
+  }
+  // Enemies' own traits (a ghoul's hunger, a templar's watchfulness).
+  for (const e of state.enemies) {
+    const me = refOf(state, e);
+    for (const t of getEnemy(e.type).traits ?? [])
+      if (matches(state, t, ev, me, e)) out.push({ owner: e, trigger: t, rule: e.type, surface: null, once: false });
   }
   for (const u of allUnits(state)) {
     const me = refOf(state, u);

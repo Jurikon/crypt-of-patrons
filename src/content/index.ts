@@ -1,4 +1,5 @@
 import type {
+  BiomeDef,
   AbilityDef,
   ClassDef,
   EnemyDef,
@@ -128,7 +129,7 @@ export const ABILITIES: readonly AbilityDef[] = [
     id: 'rogue.shadowStep',
     nameKey: 'ability.rogue.shadowStep',
     tags: ['movement'],
-    cooldown: 2,
+    cooldown: 3,
     target: { kind: 'unit', range: 3, filter: 'foes', sight: false, freeBehind: true },
     // The target is dazed for a turn: it cannot turn round, so the next blow lands in its back.
     effects: [{ kind: 'teleportBehind' }, { kind: 'status', status: 'daze', turns: 1 }],
@@ -668,8 +669,44 @@ const LINGER = (status: string, turns: number, amount?: number) =>
 export const SURFACES: readonly SurfaceDef[] = [
   { id: 'corpse', nameKey: 'surface.corpse', triggers: [] },
   { id: 'blood', nameKey: 'surface.blood', triggers: [] },
-  { id: 'ice', nameKey: 'surface.ice', triggers: [] },
-  { id: 'fire', nameKey: 'surface.fire', triggers: LINGER('burning', 2) },
+  // Fire melts ice into water.
+  { id: 'ice', nameKey: 'surface.ice', triggers: [], reactions: [{ with: 'fire', result: 'water' }] },
+  {
+    id: 'fire',
+    nameKey: 'surface.fire',
+    triggers: LINGER('burning', 2),
+    reactions: [
+      { with: 'ice', result: 'water' },
+      { with: 'water', result: 'water' },
+    ],
+  },
+  /** Catacomb water: puts out the burning, carries lightning to everyone in the same pool, smothers fire. */
+  {
+    id: 'water',
+    nameKey: 'surface.water',
+    conducts: 'lightning',
+    reactions: [{ with: 'fire', result: 'water' }],
+    triggers: [
+      {
+        on: 'enterCell',
+        subject: 'any',
+        subjectStatus: 'burning',
+        effects: [{ kind: 'removeStatus', status: 'burning', to: { kind: 'subject' } }],
+      },
+    ],
+  },
+  /** The cathedral's holy fire: burns anyone not of its side who steps in or stays. */
+  {
+    id: 'holyFire',
+    nameKey: 'surface.holyFire',
+    hazard: true,
+    triggers: (['enterCell', 'turnEnd'] as const).map((on) => ({
+      on,
+      subject: 'foe' as const,
+      effectTags: ['fire'] as const,
+      effects: [{ kind: 'damage' as const, amount: 2, to: { kind: 'subject' as const } }],
+    })),
+  },
   { id: 'smoke', nameKey: 'surface.smoke', triggers: LINGER('blind', 2) },
   { id: 'poisonCloud', nameKey: 'surface.poisonCloud', triggers: LINGER('poison', 3, 1) },
   {
@@ -1419,7 +1456,7 @@ export const CLASSES: readonly ClassDef[] = [
   {
     id: 'rogue',
     nameKey: 'class.rogue',
-    maxHp: 15,
+    maxHp: 13,
     abilities: ['rogue.dagger', 'rogue.shadowStep'],
     passives: ['rogue.backstab'],
     pool: ['rogue.knife', 'rogue.swap', 'rogue.smoke', 'rogue.poisonBlade'],
@@ -1450,7 +1487,7 @@ export const ENEMIES: readonly EnemyDef[] = [
   {
     id: 'cryptWarden',
     nameKey: 'enemy.cryptWarden',
-    maxHp: 14,
+    maxHp: 12,
     move: 1,
     attack: { kind: 'sweep', damage: 3 },
     pattern: [
@@ -1464,18 +1501,215 @@ export const ENEMIES: readonly EnemyDef[] = [
     pushFactor: 0.5,
     boss: true,
   },
+
+  // ---- Act 1, the Crypt ----
+  {
+    id: 'ghoul',
+    nameKey: 'enemy.ghoul',
+    maxHp: 4,
+    move: 2,
+    attack: { kind: 'melee', damage: 2 },
+    behavior: { kind: 'melee' },
+    model: 'ghoul',
+    weight: 2,
+    // It eats a corpse next to it at the end of every turn: fights the Necromancer for the dead.
+    traits: [
+      {
+        on: 'turnEnd',
+        subject: 'owner',
+        effects: [
+          {
+            kind: 'consume',
+            surface: 'corpse',
+            radius: 1,
+            effects: [{ kind: 'heal', amount: 2, to: { kind: 'self' } }],
+          },
+        ],
+      },
+    ],
+  },
+
+  // ---- Act 2, the Flooded Catacombs ----
+  {
+    id: 'drowned',
+    nameKey: 'enemy.drowned',
+    maxHp: 6,
+    move: 1,
+    attack: { kind: 'line', damage: 1, range: 4, onHit: [{ kind: 'pull', distance: 2 }] },
+    behavior: { kind: 'ranged', minRange: 2, maxRange: 4 },
+    model: 'drowned',
+    weight: 3,
+  },
+  {
+    id: 'bloated',
+    nameKey: 'enemy.bloated',
+    maxHp: 3,
+    move: 1,
+    attack: { kind: 'melee', damage: 1 },
+    behavior: { kind: 'melee' },
+    model: 'bloated',
+    weight: 2,
+    onDeath: [{ kind: 'surface', surface: 'poisonCloud', at: 'self', radius: 1, turns: 3 }],
+  },
+  {
+    id: 'leech',
+    nameKey: 'enemy.leech',
+    maxHp: 2,
+    move: 2,
+    attack: { kind: 'melee', damage: 1, onHit: [{ kind: 'status', status: 'bleed', turns: 2 }] },
+    behavior: { kind: 'melee' },
+    model: 'leech',
+    weight: 1,
+    pack: 3,
+  },
+  {
+    id: 'drownedMother',
+    nameKey: 'enemy.drownedMother',
+    maxHp: 22,
+    move: 1,
+    attack: { kind: 'sweep', damage: 3 },
+    pattern: [
+      { kind: 'line', damage: 3, range: 6, surface: { id: 'water' } },
+      { kind: 'summon', unit: 'leech', count: 2 },
+      { kind: 'sweep', damage: 3 },
+    ],
+    behavior: { kind: 'melee' },
+    model: 'mother',
+    weight: 0,
+    pushFactor: 0.5,
+    boss: true,
+  },
+
+  // ---- Act 3, the Cathedral of the Fallen God ----
+  {
+    id: 'templar',
+    nameKey: 'enemy.templar',
+    maxHp: 7,
+    move: 1,
+    attack: { kind: 'melee', damage: 3 },
+    behavior: { kind: 'melee' },
+    model: 'templar',
+    weight: 3,
+    // A shield in front, never caught off guard, and it turns on whoever hits it.
+    frontArmor: 2,
+    immune: ['daze'],
+    traits: [{ on: 'hit', subject: 'owner', effects: [{ kind: 'faceActor' }] }],
+  },
+  {
+    id: 'acolyte',
+    nameKey: 'enemy.acolyte',
+    maxHp: 4,
+    move: 1,
+    attack: { kind: 'line', damage: 1, range: 5 },
+    pattern: [
+      { kind: 'aid', range: 5, effects: [{ kind: 'shield', amount: 3, turns: 3 }] },
+      { kind: 'line', damage: 1, range: 5 },
+    ],
+    behavior: { kind: 'ranged', minRange: 3, maxRange: 5 },
+    model: 'acolyte',
+    weight: 2,
+  },
+  {
+    id: 'bellringer',
+    nameKey: 'enemy.bellringer',
+    maxHp: 5,
+    move: 1,
+    attack: { kind: 'burst', damage: 2, radius: 1, onHit: [{ kind: 'status', status: 'stun', turns: 1 }] },
+    behavior: { kind: 'melee' },
+    model: 'bellringer',
+    weight: 2,
+  },
+  {
+    id: 'fallenVoice',
+    nameKey: 'enemy.fallenVoice',
+    maxHp: 30,
+    move: 1,
+    attack: { kind: 'blast', damage: 3, radius: 1 },
+    pattern: [
+      { kind: 'blast', damage: 3, radius: 1, surface: { id: 'holyFire', turns: 3 } },
+      { kind: 'summon', unit: 'acolyte', count: 1 },
+      { kind: 'blast', damage: 3, radius: 1, surface: { id: 'holyFire', turns: 3 } },
+    ],
+    behavior: { kind: 'ranged', minRange: 3, maxRange: 6 },
+    model: 'voice',
+    weight: 0,
+    pushFactor: 0.5,
+    boss: true,
+    // At half health the floor cracks with holy fire and it comes down to fight.
+    phases: [
+      {
+        hpAtMost: 15,
+        move: 2,
+        behavior: { kind: 'melee' },
+        pattern: [
+          { kind: 'sweep', damage: 4 },
+          { kind: 'burst', damage: 3, radius: 1 },
+        ],
+        onEnter: [{ kind: 'scatterSurface', surface: 'holyFire', count: 8 }],
+      },
+    ],
+  },
+];
+
+/** The three acts' places (GDD 1). */
+export const BIOMES: readonly BiomeDef[] = [
+  {
+    id: 'crypt',
+    nameKey: 'biome.crypt',
+    enemies: [
+      { id: 'skeletonWarrior', weight: 3 },
+      { id: 'skeletonArcher', weight: 2 },
+      { id: 'ghoul', weight: 1 },
+    ],
+    boss: 'cryptWarden',
+    features: [],
+  },
+  {
+    id: 'catacombs',
+    nameKey: 'biome.catacombs',
+    enemies: [
+      { id: 'drowned', weight: 3 },
+      { id: 'bloated', weight: 2 },
+      { id: 'leech', weight: 1 },
+      { id: 'skeletonWarrior', weight: 1 },
+    ],
+    boss: 'drownedMother',
+    features: [{ surface: 'water', patches: 3, size: 5 }],
+    // Long flooded halls: fewer pits (the water is the hazard here).
+    layout: { shapes: ['rect', 'l', 'cross'], pits: [4, 4, 1, 0] },
+  },
+  {
+    id: 'cathedral',
+    nameKey: 'biome.cathedral',
+    enemies: [
+      { id: 'templar', weight: 3 },
+      { id: 'acolyte', weight: 2 },
+      { id: 'bellringer', weight: 2 },
+      { id: 'ghoul', weight: 1 },
+    ],
+    boss: 'fallenVoice',
+    features: [{ surface: 'holyFire', patches: 2, size: 2 }],
+    // Naves and colonnades.
+    layout: {
+      shapes: ['rect', 'cross', 'chamfer'],
+      pillars: { none: 0, scatter: 1, symmetric: 3, rows: 5 },
+      pits: [4, 3, 1, 0],
+    },
+  },
 ];
 
 /** Shape of one act (GDD 1): combat rooms, then the boss. */
 export const ACT = {
-  /** Rooms before the boss. */
-  rooms: 6,
+  /** Rooms before the boss, in each act. */
+  rooms: 5,
+  /** Acts in a run, one biome each. */
+  acts: 3,
   /** Elite rooms at most per act. */
   maxElites: 2,
   /** Treasure doors at most per act. */
   maxTreasures: 1,
-  /** Altars at most per act; the first is guaranteed in rooms 2–3. */
-  maxAltars: 3,
+  /** Altars at most per act; the run's first is guaranteed in rooms 2–3 of act 1. */
+  maxAltars: 2,
   /** Chance a duo gift takes the third card on an altar when it is unlocked. */
   duoChance: 0.5,
   /** Rooms (1-based) in which the Initiation door shows up, once per act. */
@@ -1483,6 +1717,8 @@ export const ACT = {
   initiationBy: 3,
   /** Share of max health a rest room restores. */
   restHeal: 0.5,
+  /** Share of max health restored on the way into a new act (after its boss). */
+  actHeal: 1,
   /** Reward options offered at once (pick 1 of 3). */
   offer: 3,
   /** Extra health of elite enemies, and extra enemies in an elite room. */
@@ -1553,3 +1789,4 @@ export const getGift = byId(GIFTS, 'gift');
 export const getPatron = byId(PATRONS, 'patron');
 export const getClass = byId(CLASSES, 'class');
 export const getEnemy = byId(ENEMIES, 'enemy');
+export const getBiome = byId(BIOMES, 'biome');

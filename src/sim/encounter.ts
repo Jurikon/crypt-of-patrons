@@ -1,7 +1,7 @@
 import { add, dirVec, floodFill, getCell, index, type Vec2 } from '../core/grid';
 import { int, shuffle, weighted, type Rng } from '../core/rng';
-import { ACT, ENEMIES, encounterWeights, getEnemy, ROOM_CORPSES } from '../content';
-import type { Enemy, GameState, RoomKind, Surface } from './state';
+import { ACT, encounterWeights, getEnemy, ROOM_CORPSES, type BiomeDef } from '../content';
+import { biomeOf, type Enemy, type GameState, type RoomKind, type Surface } from './state';
 
 /** Minimum distance (both walking and straight-line) between the players and any enemy at spawn. */
 export const MIN_SPAWN_DISTANCE = 3;
@@ -50,24 +50,34 @@ export function placeEncounter(rng: Rng, state: GameState, depth = 1, kind: Room
   }
 
   const enemies: Enemy[] = [];
+  const biome = biomeOf(state);
   if (kind === 'boss') {
-    const boss = ENEMIES.find((d) => d.boss);
     const far = near[0] ?? [];
     const cell = [...candidates].sort((a, b) => (far[index(g, b.x, b.y)] ?? 0) - (far[index(g, a.x, a.y)] ?? 0))[0];
-    if (boss && cell) enemies.push(makeEnemy('e1', boss.id, cell, 2, false));
+    if (cell) enemies.push(makeEnemy('e1', biome.boss, cell, 2, false));
     return enemies;
   }
   const pool = shuffle(rng, candidates);
+  const taken = (c: Vec2) => enemies.some((e) => e.x === c.x && e.y === c.y);
+  let groups = 0;
   for (const cell of pool) {
-    if (enemies.length >= count) break;
+    if (groups >= count) break;
     // Leave a gap between enemies so they do not start glued together.
     if (enemies.some((e) => Math.abs(e.x - cell.x) + Math.abs(e.y - cell.y) < 2)) continue;
-    const def = weighted(
+    const type = weighted(
       rng,
-      ENEMIES.filter((d) => d.weight > 0).map((d) => ({ item: d, weight: d.weight })),
+      biome.enemies.map((x) => ({ item: x.id, weight: x.weight })),
     );
     const dir = int(rng, 0, 3) as 0 | 1 | 2 | 3;
-    enemies.push(makeEnemy(`e${enemies.length + 1}`, def.id, cell, dir, kind === 'elite'));
+    groups++;
+    enemies.push(makeEnemy(`e${enemies.length + 1}`, type, cell, dir, kind === 'elite'));
+    // A pack (leeches) fills in on free candidate cells next to the first.
+    for (let i = 1; i < (getEnemy(type).pack ?? 1); i++) {
+      const spot = candidates.find(
+        (c) => !taken(c) && enemies.some((e) => e.type === type && Math.abs(e.x - c.x) + Math.abs(e.y - c.y) === 1),
+      );
+      if (spot) enemies.push(makeEnemy(`e${enemies.length + 1}`, type, spot, dir, kind === 'elite'));
+    }
   }
   return enemies;
 }
@@ -88,7 +98,44 @@ export function makeEnemy(id: string, type: string, cell: Vec2, dir: 0 | 1 | 2 |
     moved: false,
     elite,
     strikes: 0,
+    phase: 0,
   };
+}
+
+/**
+ * A biome's hazards lying around at the start of a fight (pools of water, holy fire): patches grown
+ * from a seed cell, on free floor away from the players and doorways. Its own RNG fork.
+ */
+export function placeFeatures(rng: Rng, state: GameState, biome: BiomeDef): Surface[] {
+  const g = state.room.grid;
+  const doorCells = new Set(state.room.doors.map((d) => index(g, d.x + dirVec(d.dir).x, d.y + dirVec(d.dir).y)));
+  const out: Surface[] = [];
+  const free = (c: Vec2) =>
+    getCell(g, c.x, c.y) === 'floor' &&
+    !doorCells.has(index(g, c.x, c.y)) &&
+    !state.players.some((p) => Math.abs(p.x - c.x) + Math.abs(p.y - c.y) < 2) &&
+    !out.some((s) => s.x === c.x && s.y === c.y);
+  for (const f of biome.features) {
+    for (let n = 0; n < f.patches; n++) {
+      const start = shuffle(rng, allCells(g).filter(free))[0];
+      if (!start) break;
+      const cells = [start];
+      for (let tries = 0; tries < f.size * 4 && cells.length < f.size; tries++) {
+        const from = cells[int(rng, 0, cells.length - 1)] as Vec2;
+        const next = add(from, dirVec(int(rng, 0, 3) as 0 | 1 | 2 | 3));
+        if (free(next) && !cells.some((c) => c.x === next.x && c.y === next.y)) cells.push(next);
+      }
+      // Hazards that start in a room belong to nobody, so they hurt both sides.
+      for (const c of cells) out.push({ id: f.surface, x: c.x, y: c.y, turns: null, side: 'neutral' });
+    }
+  }
+  return out;
+}
+
+function allCells(g: GameState['room']['grid']): Vec2[] {
+  const out: Vec2[] = [];
+  for (let y = 0; y < g.h; y++) for (let x = 0; x < g.w; x++) out.push({ x, y });
+  return out;
 }
 
 /**
