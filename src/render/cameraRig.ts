@@ -19,6 +19,9 @@ const LOOK_SENSITIVITY = 0.0025;
 
 const easeInOut = (t: number) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
 const easeOut = (t: number) => 1 - (1 - t) ** 3;
+/** How far a tween has run, 0..1; a zero-length one (an instant mouse turn) is already done. */
+const progress = (now: number, start: number, duration: number) =>
+  duration > 0 ? Math.min(1, Math.max(0, (now - start) / duration)) : 1;
 
 /** World-space centre of a cell, at floor level. */
 export function cellCenter(p: Vec2): THREE.Vector3 {
@@ -194,7 +197,7 @@ export class CameraRig {
   update(now: number): void {
     // First-person pose.
     const pos = this.currentPos(now);
-    const stepT = Math.min(1, (now - this.pos.start) / this.pos.duration);
+    const stepT = progress(now, this.pos.start, this.pos.duration);
     const moving = this.pos.from.distanceToSquared(this.pos.to) > 1e-6 && stepT < 1;
     const bob = moving ? Math.sin(stepT * Math.PI) * BOB_AMPLITUDE : 0;
     pos.y = EYE_HEIGHT + bob;
@@ -245,13 +248,13 @@ export class CameraRig {
 
   /** Interpolated grid position (floor level), without bob or bump. */
   currentPos(now: number): THREE.Vector3 {
-    const t = Math.min(1, (now - this.pos.start) / this.pos.duration);
+    const t = progress(now, this.pos.start, this.pos.duration);
     return this.pos.from.clone().lerp(this.pos.to, easeOut(t));
   }
 
   /** Interpolated yaw without mouse look. */
   currentYaw(now: number): number {
-    const t = Math.min(1, (now - this.yaw.start) / this.yaw.duration);
+    const t = progress(now, this.yaw.start, this.yaw.duration);
     return this.yaw.from + (this.yaw.to - this.yaw.from) * easeOut(t);
   }
 }
